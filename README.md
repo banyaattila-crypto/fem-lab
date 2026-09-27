@@ -79,12 +79,43 @@ a FEM bemenete. Az
 rúdtörlést, ami a terhek hivatkozásait is újraszámolja (`structureIsConsistent`
 ellenőrzi, tesztelve van).
 
+### Számítás (2D membránelem)
+
+A `src/membrane.ts` négyszögletű (Q4) **síkrugalmassági — membrán — elemet**
+tartalmaz: csomópontonként 2 szabadsági fok (ux, uy), a lemez a saját síkjában
+nyúlik. A `MembraneModel` a bemenet (E, ν, vastagság, csomópontok, elemek,
+rögzítések, pont- és élterhek), a `solveMembrane()` a megoldó.
+
+- **Merevségi mátrix:** 2×2-es Gauss-integrálás (síkbeli nyúlásnál nincs
+  locking, és a nyíróenergiát is jól közelíti).
+- **Feszültség-visszanyerés:** 2×2 Gauss-pontonként σxx, σyy, τxy, fősajtos
+  értékek és von Mises; elemenként az átlag és a maximum.
+- **Terhek:** koncentrált csomóponti erők és élterhek. Az élteher a
+  `from → to` élre merőleges; a pozitív `t` anticlockwise elemhálónál a lemezből
+  kifelé húz (t = σ·n), és a belső él csak egyszer számítódik.
+- **Eredmények:** elmozdulásvektor, reakciók, a globális terhelés- és
+  reakciómérleg (erő és nyomaték, ~1e-10 relatív hibával), max |u|,
+  max von Mises és a meghatározó elem.
+
+**Ellenőrzés (21 teszt):** egyetlen elemen a húzás pontos; ν = 0 esetén a
+lineáris feszültségmező minden Gauss-pontban pontosan P/A; valós ν-val a
+középső zónában tiszta húzás; a Timoshenko-féle kantilever-megoldás
+(lehajlás + nyírás) 5%-on belül, hálófinomítással monoton közelítve; a Poisson-
+hatás (`εyy = −ν·εxx`) hálófüggetlenül pontos; tükrözési szimmetria; a
+feszültség a vastagságtól a keresztmetszeten keresztül függ (`P/(t·h)`), az
+elmozdulás `1/t`.
+
+**Korlát:** a membránelem a síkra merőleges kihajlást NEM számolja. Ehhez három
+szabadsági fokos (w, θx, θy) lemezelem kell — ez külön feladat.
+
 ## Következő lépések
 
-1. Támaszok (csukló / görgő / befogás) és koncentrált + megoszló terhek rajzolása.
-2. 1D váz-szolver (Euler–Bernoulli rúdelem + rácsrúd), N/M/V és σ visszanyeréssel.
-3. Deformált alakzat, rúderő- és feszültség-diagramok.
-4. Szelvény- és anyagkatalógus, szelvényszerkesztő.
+1. A membránelem integrálása a rajzolóba: négyzögháló generálás, peremtámaszok,
+   élterhek, feszültségszínkép.
+2. Három szabadsági fokos lemezhajlítási elem (w, θx, θy) a síkra merőleges
+   kihajlításhoz.
+3. Szelvényszerkesztő; használhatósági ellenőrzés (lehajláskorlátok).
+4. A kihajlásnál a hatékony hossz valódi végfeltételekből (K-faktor).
 
 ## Fejlesztés
 
