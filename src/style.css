@@ -177,6 +177,16 @@ button.small {
   font-size: 12px;
 }
 
+#res-util.over {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+#element-table tr.governing td {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 #diagram-toggles {
   display: flex;
   gap: 6px;

@@ -447,3 +447,58 @@ describe('szolver — ferde és függőleges rúd', () => {
     }
   });
 });
+
+describe('szolver — feszültségkihasználtság', () => {
+  /** Kétszer raktárosott rúd, a szélesség úgy skálázva, hogy a kihasználtság éppen 1 legyen. */
+  function sizedToUnity(): { s: Structure; L: number } {
+    const s = chain(2);
+    const I = 0.15 ** 4 / 12;
+    const Mmax = 10000; // q*L²/8
+    const fy = s.catalog.materials.find((m) => m.id === 's235')!.fy * 1e6;
+    const neededI = (Mmax * 0.075) / fy;
+    // hajlításnál σ = M·c/I, ahol c ~ scale és I ~ scale⁴, tehát σ ~ 1/scale³
+    const scale = (neededI / I) ** (1 / 3);
+    const sec = s.catalog.sections.find((x) => x.id === 'sq150')!;
+    if (sec.shape === 'rect') {
+      sec.b = sec.b * scale;
+      sec.h = sec.h * scale;
+    }
+    return { s, L: scale };
+  }
+
+  it('a méretezéssel a kihasználtság éppen 1.0', () => {
+    const { s } = sizedToUnity();
+    const r = solve(s);
+    expect(r.ok).toBe(true);
+    expect(r.maxUtilization).toBeCloseTo(1, 3);
+    expect(r.utilizationBeam).toBeGreaterThanOrEqual(0);
+  });
+
+  it('kétszer akkora keresztmetszet feleannyi kihasználtságot ad', () => {
+    const { s } = sizedToUnity();
+    for (const sec of s.catalog.sections) {
+      if (sec.shape === 'rect') {
+        sec.b *= 2;
+        sec.h *= 2;
+      }
+    }
+    const r = solve(s);
+    // a másodlagos tengely körüli hajlítás most négyszer kisebb feszültséget ad
+    expect(r.maxUtilization).toBeLessThan(0.5);
+  });
+
+  it('a hasznos magasságegyenérték a maradék kapacitással egyezik', () => {
+    const { s } = sizedToUnity();
+    const r = solve(s);
+    for (const e of r.elements) {
+      expect(e.wNeeded).toBeGreaterThan(0);
+      // éppen a határon álló rúdhoz a szükséges W megegyezik a valódival
+      const sec = s.catalog.sections.find((x) => x.id === 'sq150')!;
+      const props = sectionProps(sec);
+      const yMax = Math.max(props.yBot, props.yTop);
+      if (e.beam === r.utilizationBeam) {
+        expect(e.wNeeded).toBeCloseTo(props.I / yMax, 6);
+      }
+    }
+  });
+});

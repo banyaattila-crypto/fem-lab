@@ -35,6 +35,14 @@ export interface ElementResult {
   };
   /** a rúd mentén ható megoszló terhek összege (N/m, lokális keresztirányú) */
   distributed: number[];
+  /** a rúd mentén keresett maximumok (abszolút érték) */
+  extremes: { N: number; V: number; M: number; sigma: number; def: number };
+  /** a legnagyobb feszültség helye a rúdon (xi = 0…1) */
+  xiSigma: number;
+  /** feszültségkihasználtság: max σ / fy (1.0 = a folyáshatár elérése) */
+  utilization: number;
+  /** hasznos magasságegyenérték a legnagyobb feszültség helyén (m) */
+  wNeeded: number;
 }
 
 export interface Reaction {
@@ -55,8 +63,11 @@ export interface SolveResult {
   elements: ElementResult[];
   /** alkalmazott terhek összege (N, N, N·m) — az egyensúlyi ellenőrzéshez */
   applied: { fx: number; fy: number; mz: number };
-  /** reakciók összege (N, N, N·m) — megegyezik az `applied` értékével */
+  /** reakciók összege (N, N, N·m) — az `applied` ellentettje */
   reaction: { fx: number; fy: number; mz: number };
+  /** legnagyobb feszültségkihasználtság (max σ / fy) és a meghatározó rúd sorszáma */
+  maxUtilization: number;
+  utilizationBeam: number;
   maxAbsU: number;
   maxAbsTheta: number;
   maxN: number;
@@ -74,6 +85,11 @@ export interface SolveResult {
 
 function rhoOf(s: Structure, bm: Beam): number {
   return s.catalog.materials.find((m) => m.id === bm.materialId)?.rho ?? 0;
+}
+
+/** karakterisztikus folyáshatár MPa-ban */
+function materialFy(s: Structure, bm: Beam): number {
+  return s.catalog.materials.find((m) => m.id === bm.materialId)?.fy ?? 0;
 }
 
 interface ElementProps {
@@ -216,6 +232,8 @@ export function solve(s: Structure): SolveResult {
     elements: [],
     applied: { fx: 0, fy: 0, mz: 0 },
     reaction: { fx: 0, fy: 0, mz: 0 },
+    maxUtilization: 0,
+    utilizationBeam: -1,
     maxAbsU: 0,
     maxAbsTheta: 0,
     maxN: 0,
@@ -426,6 +444,10 @@ export function solve(s: Structure): SolveResult {
       sigmaMax,
       endForces,
       distributed,
+      extremes: { N: 0, V: 0, M: 0, sigma: 0, def: 0 },
+      xiSigma: 0,
+      utilization: 0,
+      wNeeded: 0,
     });
     propsOf.set(p.beam.id, p);
   }
@@ -433,19 +455,64 @@ export function solve(s: Structure): SolveResult {
   // A maximumokat a rúd MENTÉN érdemes keresni, nem csak a végpontokban: egy
   //etlen elemnél a megoszló teher miatt a legnagyobb nyomaték a középen van.
   const STEP = 32;
+  let maxUtilization = 0;
+  let utilizationBeam = -1;
+  let maxAbsU = 0;
+  let maxAbsTheta = 0;
+  for (let n = 0; n < s.nodes.length; n++) {
+    maxAbsU = Math.max(maxAbsU, Math.hypot(u[dof(n, 0)]!, u[dof(n, 1)]!));
+    maxAbsTheta = Math.max(maxAbsTheta, Math.abs(u[dof(n, 2)]!));
+  }
   for (const e of elements) {
     const p = propsOf.get(e.beam)!;
     const q = e.distributed.reduce((t, v) => t + v, 0);
     const L = e.length;
+    const ex = { N: 0, V: 0, M: 0, sigma: 0, def: 0 };
+    let xiSigma = 0;
     for (let k = 0; k <= STEP; k++) {
-      const x = (k / STEP) * L;
+      const xi = k / STEP;
+      const x = xi * L;
       const V = -e.endForces.i.f + q * x;
       const M = -e.endForces.i.m + e.endForces.i.f * x - (q * x * x) / 2;
       const N = -e.endForces.i.n;
+      const sigma = Math.abs(N) / p.A + (Math.abs(M) * p.yMax) / p.I;
+      if (Math.abs(N) > ex.N) ex.N = Math.abs(N);
+      if (Math.abs(V) > ex.V) ex.V = Math.abs(V);
+      if (Math.abs(M) > ex.M) ex.M = Math.abs(M);
+      if (sigma > ex.sigma) {
+        ex.sigma = sigma;
+        xiSigma = xi;
+      }
       maxN = Math.max(maxN, Math.abs(N));
       maxV = Math.max(maxV, Math.abs(V));
       maxM = Math.max(maxM, Math.abs(M));
-      maxSigma = Math.max(maxSigma, Math.abs(N) / p.A + (Math.abs(M) * p.yMax) / p.I);
+      maxSigma = Math.max(maxSigma, sigma);
+    }
+    // a lehajlás maximuma a rúd mentén (a valós alak kvartikus, a Hermite-elem
+    // csak kubikus), ezért itt is végig kell nézni
+    const bm = s.beams[e.beam]!;
+    const a = nodeById(s, bm.nodeI)!;
+    const b = nodeById(s, bm.nodeJ)!;
+    for (let k = 1; k < STEP; k++) {
+      const xi = k / STEP;
+      const d = shapePoint(s, u, e.beam, xi);
+      const def = Math.hypot(d.x - (a.x + xi * (b.x - a.x)), d.y - (a.y + xi * (b.y - a.y)));
+      ex.def = Math.max(ex.def, def);
+    }
+    maxAbsU = Math.max(maxAbsU, ex.def);
+    const fy = materialFy(s, bm) * 1e6;
+    e.extremes = ex;
+    e.xiSigma = xiSigma;
+    e.utilization = fy > 0 ? ex.sigma / fy : 0;
+    // a szükséges keresztmetszeti modulus: a maradék feszültségkapacitással számolva
+    const x = xiSigma * L;
+    const Mxi = -e.endForces.i.m + e.endForces.i.f * x - (q * x * x) / 2;
+    const Nxi = -e.endForces.i.n;
+    const reserve = fy - Math.abs(Nxi) / p.A;
+    e.wNeeded = reserve > 0 ? Math.abs(Mxi) / reserve : 0;
+    if (e.utilization > maxUtilization) {
+      maxUtilization = e.utilization;
+      utilizationBeam = e.beam;
     }
   }
 
@@ -459,12 +526,6 @@ export function solve(s: Structure): SolveResult {
     applied.mz += F[dof(n, 2)]!;
   }
 
-  let maxAbsU = 0;
-  let maxAbsTheta = 0;
-  for (let n = 0; n < s.nodes.length; n++) {
-    maxAbsU = Math.max(maxAbsU, Math.hypot(u[dof(n, 0)]!, u[dof(n, 1)]!));
-    maxAbsTheta = Math.max(maxAbsTheta, Math.abs(u[dof(n, 2)]!));
-  }
   // a lehajlás maximuma a rúd közepén is lehet (valódi alak kvartikus, a Hermite-
   // elem csak kubikus), ezért a rúd mentén is végig kell nézni
   for (const e of elements) {
@@ -486,6 +547,8 @@ export function solve(s: Structure): SolveResult {
     elements,
     applied,
     reaction,
+    maxUtilization,
+    utilizationBeam,
     maxAbsU,
     maxAbsTheta,
     maxN,

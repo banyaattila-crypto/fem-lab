@@ -42,6 +42,8 @@ const resTheta = el<HTMLElement>('#res-theta');
 const resDof = el<HTMLElement>('#res-dof');
 const resBalance = el<HTMLElement>('#res-balance');
 const reactionBody = el<HTMLTableSectionElement>('#reaction-body');
+const elementBody = el<HTMLTableSectionElement>('#element-body');
+const resUtil = el<HTMLElement>('#res-util');
 const diagButtons = {
   n: el<HTMLButtonElement>('#btn-diag-n'),
   v: el<HTMLButtonElement>('#btn-diag-v'),
@@ -415,6 +417,30 @@ function runSolve(): void {
   const scale = Math.max(1, Math.abs(r.momentBalance.applied));
   const rel = r.momentBalance.error / scale;
   resBalance.textContent = rel < 1e-6 ? 'zárt' : `eltérés ${rel.toExponential(1)}`;
+  const utilPct = r.maxUtilization * 100;
+  resUtil.textContent = `${utilPct.toFixed(1)} % (rúd #${r.utilizationBeam + 1})`;
+  resUtil.classList.toggle('over', r.maxUtilization > 1);
+
+  elementBody.innerHTML = '';
+  for (const e of r.elements) {
+    const tr = document.createElement('tr');
+    if (e.beam === r.utilizationBeam) tr.classList.add('governing');
+    for (const text of [
+      `#${e.beam + 1}`,
+      `${e.length.toFixed(2)} m`,
+      kN(e.extremes.N),
+      kN(e.extremes.V),
+      kNm(e.extremes.M),
+      MPa(e.extremes.sigma),
+      `${(e.extremes.def * 1000).toFixed(2)} mm`,
+      `${(e.utilization * 100).toFixed(1)} %`,
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.append(td);
+    }
+    elementBody.append(tr);
+  }
 
   reactionBody.innerHTML = '';
   for (const rx of r.reactions) {
@@ -435,7 +461,19 @@ function runSolve(): void {
   resultsBox.hidden = false;
   btnDeform.disabled = false;
   for (const b of Object.values(diagButtons)) b.disabled = false;
-  setMessage('Számsítás kész. Az „Alakzat” gomb mutatja a deformációt.');
+  if (r.maxUtilization > 1) {
+    setMessage(
+      `Kihasználtság ${(r.maxUtilization * 100).toFixed(1)} %: a folyáshatár TÚLLEPED — ` +
+        `rúd #${r.utilizationBeam + 1} nem bírja el a terhet.`,
+    );
+  } else if (r.maxUtilization > 0.8) {
+    setMessage(
+      `Számsítás kész, de a kihasználtság ${(r.maxUtilization * 100).toFixed(1)} % — ` +
+        `már nem nagyon van tartalék.`,
+    );
+  } else {
+    setMessage('Számsítás kész. Az „Alakzat” és a diagram gombok mutatják az eredményt.');
+  }
   draw();
 }
 

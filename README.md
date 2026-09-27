@@ -52,6 +52,12 @@ száma — és a **mérlegellenőrzés**: a terhek és a reakciók globális mom
 a kezdőpont körül. Hibátlan megoldásnál a relatív eltérés 1e-15 nagyságrendű, ezt a
 tesztek is ellenőrzik.
 
+A **Rúdonkénti eredmények** táblázat minden rúdra megadja a hosszt, a rúd
+mentén keresett max |N|, |V|, |M|, σ értékeket, a lehajlást és a
+**kihasználtságot** (max σ / fy). A kihasználtság 100% fölött a folyáshatár
+túllépését jelenti — ezt az üzenetsor is kiemeli. A táblázat a legnagyobb
+kihasználtságú rúd sorát kiemeli, és az eredménypanel megmondja, melyik az.
+
 Az **Alakzat** gomb a deformált alakzatot rajzolja, automatikus nagyítással
 (ezt az üzenetsor kiírja) — a valós lehajlás mm-es, a képernyőn láthatóvá kell
 nagyítani. Az **N/V/M diagram** gombok a rúd tengelyére merőlegesen rajzolják a
