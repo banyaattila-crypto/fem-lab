@@ -1,5 +1,7 @@
 import { cloneCatalog, defaultCatalog, materialById, sectionById, sectionProps } from './catalog';
 import type { Catalog, Material, Section } from './catalog';
+import { cloneMembrane2D, createMembrane2D } from './membrane2d';
+import type { Membrane2D } from './membrane2d';
 
 export interface Point {
   x: number;
@@ -59,6 +61,11 @@ export interface Structure {
   /** Az önsúly a szolverben külön opció — tároljuk, hogy a fájl hordozza. */
   selfWeight: boolean;
   catalog: Catalog;
+  /**
+   * A 2D membránmodell. Opcionális, hogy a 1D dokumentumok továbbra is
+   * érvényesek legyenek; a `toJSON` csak akkor írja ki, ha van tartalma.
+   */
+  membrane2d?: Membrane2D;
 }
 
 export function createStructure(): Structure {
@@ -70,6 +77,7 @@ export function createStructure(): Structure {
     distLoads: [],
     selfWeight: false,
     catalog: defaultCatalog(),
+    membrane2d: undefined,
   };
 }
 
@@ -373,6 +381,7 @@ export function structureIsConsistent(s: Structure): boolean {
 
 export function cloneStructure(s: Structure): Structure {
   return {
+    membrane2d: s.membrane2d ? cloneMembrane2D(s.membrane2d) : undefined,
     nodes: s.nodes.map((n) => ({ ...n })),
     beams: s.beams.map((bm) => ({ ...bm })),
     supports: s.supports.map((sp) => ({ ...sp })),
@@ -400,10 +409,12 @@ export interface SerializedStructure {
   selfWeight?: boolean;
   materials?: Material[];
   sections?: Section[];
+  /** a 2D membránmodell — 2. verziójú fájlokban opcionális */
+  membrane2d?: Membrane2D;
 }
 
 export function toJSON(s: Structure): SerializedStructure {
-  return {
+  const out: SerializedStructure = {
     version: 2,
     nodes: s.nodes.map((n) => ({ x: n.x, y: n.y })),
     beams: s.beams.map((bm) => ({
@@ -425,6 +436,8 @@ export function toJSON(s: Structure): SerializedStructure {
     materials: s.catalog.materials.map((m) => ({ ...m })),
     sections: s.catalog.sections.map((sec) => ({ ...sec })),
   };
+  if (s.membrane2d && s.membrane2d.elements.length > 0) out.membrane2d = cloneMembrane2D(s.membrane2d);
+  return out;
 }
 
 export function fromJSON(data: SerializedStructure): Structure {
@@ -440,5 +453,16 @@ export function fromJSON(data: SerializedStructure): Structure {
   // a csoport hiánya 1. verziójú fájlnál: minden teher állandó tehernek számít
   for (const ld of data.loads ?? []) addPointLoad(s, ld.node, ld.fx, ld.fy, ld.mz, ld.group ?? 'dead');
   for (const dl of data.distLoads ?? []) addDistLoad(s, dl.beam, dl.qy, dl.group ?? 'dead');
+  if (data.membrane2d) {
+    const d = data.membrane2d;
+    s.membrane2d = {
+      ...createMembrane2D(d.thickness ?? 0.01, d.divisions ?? 4),
+      nodes: (d.nodes ?? []).map((p) => ({ ...p })),
+      elements: (d.elements ?? []).map((e) => [...e]),
+      fixed: (d.fixed ?? []).map((f) => ({ ...f })),
+      loads: (d.loads ?? []).map((l) => ({ ...l })),
+      edgeLoads: (d.edgeLoads ?? []).map((e) => ({ ...e })),
+    };
+  }
   return s;
 }
