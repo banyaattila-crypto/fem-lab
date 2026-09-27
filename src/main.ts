@@ -3,6 +3,7 @@ import { screenToWorld } from './camera';
 import { Editor } from './editor';
 import { drawScene } from './render';
 import type { Tool } from './render';
+import type { SupportType } from './geometry';
 
 const el = <T extends HTMLElement>(sel: string): T => {
   const node = document.querySelector<T>(sel);
@@ -19,8 +20,15 @@ const editor = new Editor({ gridStep: 0.25 });
 
 const statNodes = el<HTMLElement>('#stat-nodes');
 const statBeams = el<HTMLElement>('#stat-beams');
+const statSupports = el<HTMLElement>('#stat-supports');
+const statLoads = el<HTMLElement>('#stat-loads');
 const statLength = el<HTMLElement>('#stat-length');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
+const supportButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-support]'));
+const loadFx = el<HTMLInputElement>('#load-fx');
+const loadFy = el<HTMLInputElement>('#load-fy');
+const loadMz = el<HTMLInputElement>('#load-mz');
+const loadQy = el<HTMLInputElement>('#load-qy');
 const btnUndo = el<HTMLButtonElement>('#btn-undo');
 const btnRedo = el<HTMLButtonElement>('#btn-redo');
 const btnFit = el<HTMLButtonElement>('#btn-fit');
@@ -59,10 +67,17 @@ function draw(): void {
 function refresh(): void {
   statNodes.textContent = String(editor.structure.nodes.length);
   statBeams.textContent = String(editor.structure.beams.length);
+  statSupports.textContent = String(editor.structure.supports.length);
+  statLoads.textContent = String(editor.structure.loads.length + editor.structure.distLoads.length);
   statLength.textContent = `${editor.totalLength().toFixed(2)} m`;
   btnUndo.disabled = !editor.undoAvailable();
   btnRedo.disabled = !editor.redoAvailable();
-  const hasSel = editor.selectedNodes.length > 0 || editor.selectedBeams.length > 0;
+  const hasSel =
+    editor.selectedNodes.length > 0 ||
+    editor.selectedBeams.length > 0 ||
+    editor.selectedSupports.length > 0 ||
+    editor.selectedLoads.length > 0 ||
+    editor.selectedDist.length > 0;
   btnDelete.disabled = !hasSel;
 }
 
@@ -75,6 +90,16 @@ editor.onChange(() => {
   refresh();
 });
 
+const TOOL_HINTS: Record<Tool, string> = {
+  beam: 'Rúd: kattints a kezdőpontra, majd a végpontokra — lánc folytatódik, Esc vagy dupla kattintás zárja.',
+  node: 'Csomópont: kattints oda, ahová a csomópont kerül.',
+  select: 'Kijelölés: kattints a rúdra/csomópontra, Shift a lásd, üresen húzva téglalapos kijelölés.',
+  support: 'Támasz: kattints a csomópontra. A típust a Támaszok panelen váltod.',
+  force: 'Konc. erő: kattints a csomópontra. Az értéket a Terhek panelen írd be.',
+  moment: 'Nyomaték: kattints a csomópontra. Az értéket a Terhek panelen írd be.',
+  dist: 'Megoszló teher: kattints a rúdra. Az értéket a Terhek panelen írd be.',
+};
+
 function setTool(tool: Tool): void {
   editor.setTool(tool);
   editor.finishChain();
@@ -82,14 +107,34 @@ function setTool(tool: Tool): void {
     b.classList.toggle('active', b.dataset.tool === tool);
     b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
   }
-  setMessage(
-    tool === 'beam'
-      ? 'Rúd: kattints a kezdőpontra, majd a végpontokra — lánc folytatódik, Esc vagy dupla kattintás zárja.'
-      : tool === 'node'
-        ? 'Csomópont: kattints oda, ahová a csomópont kerül.'
-        : 'Kijelölés: kattints a rúdra/csomópontra, Shift a lásd, üresen húzva téglalapos kijelölés.',
-  );
+  setMessage(TOOL_HINTS[tool]);
   draw();
+}
+
+function setSupportType(type: SupportType): void {
+  editor.setSupportType(type);
+  for (const b of supportButtons) b.classList.toggle('active', b.dataset.support === type);
+  draw();
+}
+
+for (const btn of supportButtons) {
+  btn.addEventListener('click', () => setSupportType(btn.dataset.support as SupportType));
+}
+
+function pushLoadValues(): void {
+  editor.setLoadValue({
+    fx: (Number(loadFx.value) || 0) * 1000,
+    fy: (Number(loadFy.value) || 0) * 1000,
+    mz: (Number(loadMz.value) || 0) * 1000,
+    qy: (Number(loadQy.value) || 0) * 1000,
+  });
+}
+
+for (const input of [loadFx, loadFy, loadMz, loadQy]) {
+  input.addEventListener('input', () => {
+    pushLoadValues();
+    draw();
+  });
 }
 
 for (const btn of toolButtons) {
@@ -183,6 +228,18 @@ window.addEventListener('keydown', (e) => {
     case 'n':
       setTool('node');
       break;
+    case 't':
+      setTool('support');
+      break;
+    case 'e':
+      setTool('force');
+      break;
+    case 'm':
+      setTool('moment');
+      break;
+    case 'q':
+      setTool('dist');
+      break;
     case 'f':
       editor.fit();
       break;
@@ -229,3 +286,4 @@ snapInput.addEventListener('change', () => editor.setSnap(snapInput.checked));
 window.addEventListener('resize', resize);
 resize();
 setTool('beam');
+pushLoadValues();

@@ -84,6 +84,29 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.segmented button {
+  justify-content: center;
+  padding: 6px 4px;
+  font-size: 12.5px;
+}
+
+.load-inputs {
+  margin-top: 10px;
+  display: grid;
+  gap: 2px;
+}
+
+.load-inputs .row sub {
+  font-size: 10px;
+}
+
 button {
   font: inherit;
   color: var(--text);

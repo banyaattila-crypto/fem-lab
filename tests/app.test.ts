@@ -59,6 +59,8 @@ describe('app wiring', () => {
       'board',
       'stat-nodes',
       'stat-beams',
+      'stat-supports',
+      'stat-loads',
       'stat-length',
       'message',
       'coord',
@@ -72,17 +74,24 @@ describe('app wiring', () => {
       'file-input',
       'grid-step',
       'snap-toggle',
+      'load-fx',
+      'load-fy',
+      'load-mz',
+      'load-qy',
     ];
     for (const id of ids) {
       expect(document.querySelector(`#${id}`), `#${id} hiányzik az index.html-ből`).not.toBeNull();
     }
-    expect(document.querySelectorAll('[data-tool]').length).toBe(3);
+    expect(document.querySelectorAll('[data-tool]').length).toBe(7);
+    expect(document.querySelectorAll('[data-support]').length).toBe(3);
   });
 
   it('a főmodul inicializálás hibátlan lefut és a HUD a nulláról indul', async () => {
     await import('../src/main');
     expect(document.querySelector<HTMLElement>('#stat-nodes')?.textContent).toBe('0');
     expect(document.querySelector<HTMLElement>('#stat-beams')?.textContent).toBe('0');
+    expect(document.querySelector<HTMLElement>('#stat-supports')?.textContent).toBe('0');
+    expect(document.querySelector<HTMLElement>('#stat-loads')?.textContent).toBe('0');
     expect(document.querySelector<HTMLElement>('#stat-length')?.textContent).toBe('0.00 m');
     const undo = document.querySelector<HTMLButtonElement>('#btn-undo');
     const del = document.querySelector<HTMLButtonElement>('#btn-delete');
@@ -98,5 +107,31 @@ describe('app wiring', () => {
     selectBtn?.click();
     expect(selectBtn?.classList.contains('active')).toBe(true);
     expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Kijelölés');
+  });
+
+  it('a támasztípus-választó kijelöli az aktív típust', async () => {
+    await import('../src/main');
+    const roller = document.querySelector<HTMLButtonElement>('[data-support="roller"]');
+    roller?.click();
+    expect(roller?.classList.contains('active')).toBe(true);
+    expect(
+      document.querySelector<HTMLButtonElement>('[data-support="pinned"]')?.classList.contains('active'),
+    ).toBe(false);
+  });
+
+  it('a teherértékek kN-ban érkeznek, a modell N-ben tárolja őket', async () => {
+    await import('../src/main');
+    const fy = document.querySelector<HTMLInputElement>('#load-fy');
+    if (fy) {
+      fy.value = '-12.5';
+      fy.dispatchEvent(new Event('input'));
+    }
+    const qy = document.querySelector<HTMLInputElement>('#load-qy');
+    if (qy) {
+      qy.value = '-3';
+      qy.dispatchEvent(new Event('input'));
+    }
+    const stats = document.querySelector<HTMLElement>('#stat-loads');
+    expect(stats?.textContent).toBe('0');
   });
 });

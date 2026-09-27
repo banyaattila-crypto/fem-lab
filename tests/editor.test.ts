@@ -242,3 +242,226 @@ describe('szerkesztő — mentés, betöltés, kamera', () => {
     expect(e.camera.zoom).toBeCloseTo(80, 6);
   });
 });
+
+describe('szerkesztő — támaszok', () => {
+  function portal(): Editor {
+    const e = makeEditor();
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+    drawBeam(e, [
+      { x: 2, y: 0 },
+      { x: 2, y: 2 },
+    ]);
+    return e;
+  }
+
+  it('támasz eszközzel csomópontra lerak', () => {
+    const e = portal();
+    e.setTool('support');
+    e.setSupportType('pinned');
+    e.pointerDown({ x: 0, y: 0 });
+    expect(e.structure.supports).toHaveLength(1);
+    expect(e.structure.supports[0]!.node).toBe(0);
+    expect(e.structure.supports[0]!.type).toBe('pinned');
+  });
+
+  it('támasz csak csomópontra rakódik, üres helyre nincs', () => {
+    const e = portal();
+    e.setTool('support');
+    e.pointerDown({ x: 5, y: 5 });
+    expect(e.structure.supports).toHaveLength(0);
+  });
+
+  it('a típusváltás a helyén cseréli a támaszt', () => {
+    const e = portal();
+    e.setTool('support');
+    e.setSupportType('pinned');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setSupportType('fixed');
+    e.pointerDown({ x: 0, y: 0 });
+    expect(e.structure.supports).toHaveLength(1);
+    expect(e.structure.supports[0]!.type).toBe('fixed');
+  });
+
+  it('a támaszszimbólumra kattintva a támasz jelölődik ki és törölhető', () => {
+    const e = portal();
+    e.setTool('support');
+    e.setSupportType('roller');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setTool('select');
+    const cam = e.camera;
+    const vp = e.viewport;
+    // a támasz szimbóluma a csomópont alatt 20 px-rel rajzolódik
+    const sx = 0 * cam.zoom + vp.width / 2;
+    const sy = vp.height / 2 + 20;
+    e.pointerDown({
+      x: (sx - vp.width / 2) / cam.zoom,
+      y: -(sy - vp.height / 2) / cam.zoom,
+    });
+    expect(e.selectedSupports).toEqual([0]);
+    e.deleteSelection();
+    expect(e.structure.supports).toHaveLength(0);
+    expect(e.structure.nodes).toHaveLength(3);
+  });
+
+  it('a rácson futó portál két támasza egy kattintással kész', () => {
+    const e = makeEditor();
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+    e.setTool('support');
+    e.pointerDown({ x: 0, y: 0 });
+    e.pointerDown({ x: 4, y: 0 });
+    e.setSupportType('roller');
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.structure.supports).toHaveLength(2);
+    expect(structureIsConsistent(e.structure)).toBe(true);
+  });
+});
+
+describe('szerkesztő — terhek', () => {
+  function beamed(): Editor {
+    const e = makeEditor();
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+    return e;
+  }
+
+  it('konc. erő eszköz a beírt értékkel rak le erőt a csomópontra', () => {
+    const e = beamed();
+    e.setTool('force');
+    e.setLoadValue({ fx: 0, fy: -10000 });
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.structure.loads).toHaveLength(1);
+    expect(e.structure.loads[0]!.fy).toBe(-10000);
+    expect(e.structure.loads[0]!.node).toBe(1);
+  });
+
+  it('a rúd közepére nem tesz koncentrált erőt, ott csak megoszló mehet', () => {
+    const e = beamed();
+    e.setTool('force');
+    e.setLoadValue({ fy: -10000 });
+    e.pointerDown({ x: 2, y: 0 });
+    expect(e.structure.loads).toHaveLength(0);
+  });
+
+  it('nulla erővel nem jön létre teher', () => {
+    const e = beamed();
+    e.setTool('force');
+    e.setLoadValue({ fx: 0, fy: 0 });
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.structure.loads).toHaveLength(0);
+  });
+
+  it('nyomaték eszköz csak a mz komponenst használja', () => {
+    const e = beamed();
+    e.setTool('moment');
+    e.setLoadValue({ fy: -10000, mz: 2500 });
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.structure.loads[0]!.mz).toBe(2500);
+    expect(e.structure.loads[0]!.fy).toBe(0);
+  });
+
+  it('megoszló teher eszköz a rúdra rakja', () => {
+    const e = beamed();
+    e.setTool('dist');
+    e.setLoadValue({ qy: -5000 });
+    e.pointerDown({ x: 2, y: 0 });
+    expect(e.structure.distLoads).toHaveLength(1);
+    expect(e.structure.distLoads[0]!.beam).toBe(0);
+    expect(e.structure.distLoads[0]!.qy).toBe(-5000);
+  });
+
+  it('megoszló teher üres helyre nem jön létre', () => {
+    const e = beamed();
+    e.setTool('dist');
+    e.pointerDown({ x: 9, y: 9 });
+    expect(e.structure.distLoads).toHaveLength(0);
+  });
+
+  it('a teher-nyílra kattintva a teher jelölődik ki és törölhető', () => {
+    const e = beamed();
+    e.setTool('force');
+    e.setLoadValue({ fy: -10000 });
+    e.pointerDown({ x: 4, y: 0 });
+    e.setTool('select');
+    const vp = e.viewport;
+    const sx = 4 * e.camera.zoom + vp.width / 2;
+    const sy = vp.height / 2 + 31;
+    e.pointerDown({
+      x: (sx - vp.width / 2) / e.camera.zoom,
+      y: -(sy - vp.height / 2) / e.camera.zoom,
+    });
+    expect(e.selectedLoads).toEqual([0]);
+    e.deleteSelection();
+    expect(e.structure.loads).toHaveLength(0);
+  });
+
+  it('a csomópont kijelölése és törlése a hozzá tartozó terhet is törli', () => {
+    const e = beamed();
+    e.setTool('force');
+    e.setLoadValue({ fy: -10000 });
+    e.pointerDown({ x: 4, y: 0 });
+    e.setTool('select');
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.selectedNodes).toEqual([1]);
+    e.deleteSelection();
+    expect(e.structure.loads).toHaveLength(0);
+    expect(structureIsConsistent(e.structure)).toBe(true);
+  });
+
+  it('undo a támaszt és a terhet is visszahozza', () => {
+    const e = beamed();
+    e.setTool('support');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setTool('force');
+    e.setLoadValue({ fy: -10000 });
+    e.pointerDown({ x: 4, y: 0 });
+    expect(e.structure.supports).toHaveLength(1);
+    expect(e.structure.loads).toHaveLength(1);
+    e.doUndo();
+    expect(e.structure.loads).toHaveLength(0);
+    e.doUndo();
+    expect(e.structure.supports).toHaveLength(0);
+    e.doRedo();
+    e.doRedo();
+    expect(e.structure.supports).toHaveLength(1);
+    expect(e.structure.loads).toHaveLength(1);
+  });
+
+  it('a rajz törlése a támaszokat és terheket is elviszi, és visszavonható', () => {
+    const e = beamed();
+    e.setTool('support');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setTool('force');
+    e.setLoadValue({ fy: -10000 });
+    e.pointerDown({ x: 4, y: 0 });
+    e.clearAll();
+    expect(e.structure.supports).toHaveLength(0);
+    expect(e.structure.loads).toHaveLength(0);
+    e.doUndo();
+    expect(e.structure.supports).toHaveLength(1);
+    expect(e.structure.loads).toHaveLength(1);
+  });
+
+  it('export és import megőrzi a támaszokat és terheket', () => {
+    const e = beamed();
+    e.setTool('support');
+    e.setSupportType('fixed');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setTool('dist');
+    e.setLoadValue({ qy: -5000 });
+    e.pointerDown({ x: 2, y: 0 });
+    const json = e.exportJSON();
+    expect(json).toContain('fixed');
+    const e2 = makeEditor();
+    expect(e2.importJSON(json)).toBe(true);
+    expect(e2.structure.supports[0]!.type).toBe('fixed');
+    expect(e2.structure.distLoads[0]!.qy).toBe(-5000);
+  });
+});

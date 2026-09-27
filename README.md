@@ -6,7 +6,7 @@ Az alkalmazás első lépése a rajzolás: a felhasználó a vászonra felrajzol
 csomópontokból és rudakból. Ez a rajz a későbbi FEM-számítás geometriai bemenete —
 a modellezés nem előre gyárilag sávolt sablonokból indul, hanem abból, amit rajzolsz.
 
-## Most (1. iteráció): a rajzoló
+## Most (2. iteráció): a rajzoló + támaszok/terhek
 
 - **Rúd eszköz** — kattints a kezdőpontra, majd a végpontokra; a lánc folytatódik
   (Esc vagy dupla kattintás zárja). A meglévő csomópontra kattintva az ahhoz csatlakozik,
@@ -17,13 +17,23 @@ a modellezés nem előre gyárilag sávolt sablonokból indul, hanem abból, ami
 - **Rács + ugrás** — adaptív rács, választható lépés (alap 0,25 m) és rácsra ugrás.
 - **Nagyítás/képezés** — görgő a horgonypont körül, jobb gomb vagy Alt a húzás.
 - **Undo/redo** (Ctrl+Z / Ctrl+Shift+Z), modell **export/import** JSON-ban.
-- Élő statisztika: csomópontok, rudak, teljes rúdhossz.
+- **Támasz eszköz** (T) — csukló / görgő / befogás lerakása csomópontra; egy
+  csomóponton egy támasz, a szimbólumra kattintva kijelölhető (Del törli).
+- **Konc. erő** (E), **nyomaték** (M) — csomópontra rakható, Fx/Fy/M értékek
+  kN, kN·m egységben adhatók meg.
+- **Megoszló teher** (Q) — rúdra rakható, qy kN/m-ben; pozitív felfelé, negatív
+  lefelé mutat.
+- Élő statisztika: csomópontok, rudak, támaszok, terhek, teljes rúdhossz.
+
+Az értékbevitel kN / kN·m / kN/m egységben történik, a modell SI-ben (N, N·m,
+N/m) tárol — így a szolverhez nem kell konverzió.
 
 ### Adatmodell
 
-A `Structure { nodes, beams }` a FEM bemenete, ezért a `node.id === index` és
-`beam.id === index` invariáns minden művelet után is áll (ez tesztelve van). Ezen
-épül majd a támasz- és teher definíció, majd a szolver.
+A `Structure { nodes, beams, supports, loads, distLoads }` a FEM bemenete. Az
+`id === index` invariáns minden művelet után is áll — beleértve a csomópont- és
+rúdtörlést, ami a terhek hivatkozásait is újraszámolja (`structureIsConsistent`
+ellenőrzi, tesztelve van).
 
 ## Következő lépések
 

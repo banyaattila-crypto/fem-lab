@@ -2,7 +2,9 @@ import { createCamera, fitToPoints, zoomAt } from './camera';
 import type { Camera } from './camera';
 import {
   addBeam,
+  addDistLoad,
   addNode,
+  addPointLoad,
   cloneStructure,
   createStructure,
   findBeamNear,
@@ -10,16 +12,29 @@ import {
   moveNode,
   nodeById,
   removeBeam,
+  removeDistLoad,
   removeNode,
+  removePointLoad,
+  removeSupport,
+  setSupport,
   snapPoint,
   structureIsConsistent,
   toJSON,
   fromJSON,
 } from './geometry';
-import type { Beam, Point, Structure } from './geometry';
+import type { Beam, Point, Structure, SupportType } from './geometry';
 import { canRedo, canUndo, commit, createHistory, redo, undo } from './history';
 import type { HistoryState } from './history';
 import type { SceneState, Tool } from './render';
+import { worldToScreen } from './camera';
+import { PX } from './render';
+
+export interface LoadValues {
+  fx: number;
+  fy: number;
+  mz: number;
+  qy: number;
+}
 
 export interface EditorOptions {
   gridStep?: number;
@@ -29,6 +44,16 @@ export type ChangeListener = (s: Editor) => void;
 
 type DragMode = 'none' | 'nodes' | 'marquee';
 
+function segDist(p: Point, a: Point, b: Point): number {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
+}
+
 export class Editor {
   structure: Structure = createStructure();
   camera: Camera = createCamera();
@@ -37,6 +62,11 @@ export class Editor {
   snap = true;
   selectedNodes: number[] = [];
   selectedBeams: number[] = [];
+  selectedSupports: number[] = [];
+  selectedLoads: number[] = [];
+  selectedDist: number[] = [];
+  supportType: SupportType = 'pinned';
+  loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
   hoverNode = -1;
   hoverBeam = -1;
   preview: Point | null = null;
@@ -70,6 +100,9 @@ export class Editor {
       tool: this.tool,
       selectedNodes: this.selectedNodes,
       selectedBeams: this.selectedBeams,
+      selectedSupports: this.selectedSupports,
+      selectedLoads: this.selectedLoads,
+      selectedDist: this.selectedDist,
       hoverNode: this.hoverNode,
       hoverBeam: this.hoverBeam,
       preview: this.preview,
@@ -77,7 +110,23 @@ export class Editor {
       marquee: this.marquee,
       gridStep: this.gridStep,
       snap: this.snap,
+      supportType: this.supportType,
+      loadValue: this.loadValue,
     };
+  }
+
+  setSupportType(t: SupportType): void {
+    this.supportType = t;
+    this.emit();
+  }
+
+  setLoadValue(v: Partial<LoadValues>): void {
+    this.loadValue = { ...this.loadValue, ...v };
+    this.emit();
+  }
+
+  private toScreen(p: Point): Point {
+    return worldToScreen(this.camera, this.viewport, p);
   }
 
   setTool(t: Tool): void {
@@ -142,27 +191,147 @@ export class Editor {
       return;
     }
 
+    if (this.tool === 'support') {
+      const near = findNodeNear(this.structure, w, this.tol());
+      if (!near) return;
+      commit(this.history, this.structure);
+      setSupport(this.structure, near.id, this.supportType);
+      this.emit();
+      return;
+    }
+
+    if (this.tool === 'force' || this.tool === 'moment') {
+      const near = findNodeNear(this.structure, w, this.tol());
+      if (!near) return;
+      const { fx, fy, mz } = this.loadValue;
+      const useFx = this.tool === 'force' ? fx : 0;
+      const useFy = this.tool === 'force' ? fy : 0;
+      const useMz = this.tool === 'moment' ? mz : 0;
+      if (useFx === 0 && useFy === 0 && useMz === 0) return;
+      commit(this.history, this.structure);
+      addPointLoad(this.structure, near.id, useFx, useFy, useMz);
+      this.emit();
+      return;
+    }
+
+    if (this.tool === 'dist') {
+      const near = findBeamNear(this.structure, w, this.tol());
+      if (!near || this.loadValue.qy === 0) return;
+      commit(this.history, this.structure);
+      addDistLoad(this.structure, near.id, this.loadValue.qy);
+      this.emit();
+      return;
+    }
+
     const nearNode = findNodeNear(this.structure, w, this.tol());
     if (nearNode) {
       this.dragMode = 'nodes';
+      this.clearItemSelection();
+      if (!this.selectedNodes.includes(nearNode.id)) this.selectedBeams = [];
       if (!this.selectedNodes.includes(nearNode.id)) {
         this.selectedNodes = [nearNode.id];
-        this.selectedBeams = [];
       }
       commit(this.history, this.structure);
       this.emit();
       return;
     }
+    const hit = this.hitSelect(w);
+    if (hit && hit.kind === 'support') {
+      this.selectedSupports = [hit.id];
+      this.selectedNodes = [];
+      this.selectedBeams = [];
+      this.selectedLoads = [];
+      this.selectedDist = [];
+      this.emit();
+      return;
+    }
+    if (hit && hit.kind === 'load') {
+      this.selectedLoads = [hit.id];
+      this.selectedSupports = [];
+      this.selectedNodes = [];
+      this.selectedBeams = [];
+      this.selectedDist = [];
+      this.emit();
+      return;
+    }
+    if (hit && hit.kind === 'dist') {
+      this.selectedDist = [hit.id];
+      this.selectedSupports = [];
+      this.selectedNodes = [];
+      this.selectedBeams = [];
+      this.selectedLoads = [];
+      this.emit();
+      return;
+    }
+
     const nearBeam = findBeamNear(this.structure, w, this.tol());
     if (nearBeam) {
+      this.clearItemSelection();
       this.selectedBeams = [nearBeam.id];
       this.selectedNodes = [];
       this.emit();
       return;
     }
+    this.clearItemSelection();
     this.dragMode = 'marquee';
     this.marquee = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
     this.emit();
+  }
+
+  private clearItemSelection(): void {
+    this.selectedSupports = [];
+    this.selectedLoads = [];
+    this.selectedDist = [];
+  }
+
+  /**
+   * Kijelölésnél a képernyőn rajzolt szimbólumok (támasz, teher-nyíl) közelében
+   * keresünk — ezek pixel-méretűek, nem világ-koordinátásak.
+   */
+  private hitSelect(world: Point): { kind: 'support' | 'load' | 'dist'; id: number } | null {
+    const sp = this.toScreen(world);
+    for (const sup of this.structure.supports) {
+      const n = nodeById(this.structure, sup.node);
+      if (!n) continue;
+      const p = this.toScreen(n);
+      if (Math.hypot(sp.x - p.x, sp.y - (p.y + 20)) < 22) return { kind: 'support', id: sup.node };
+    }
+    for (const ld of this.structure.loads) {
+      const n = nodeById(this.structure, ld.node);
+      if (!n) continue;
+      const p = this.toScreen(n);
+      if (ld.mz !== 0 && Math.abs(Math.hypot(sp.x - p.x, sp.y - p.y) - PX.momentRadius) < 9) {
+        return { kind: 'load', id: ld.id };
+      }
+      if (ld.fx !== 0 || ld.fy !== 0) {
+        const mag = Math.hypot(ld.fx, ld.fy);
+        const tip = {
+          x: p.x + (ld.fx / mag) * PX.loadArrow,
+          y: p.y - (ld.fy / mag) * PX.loadArrow,
+        };
+        if (segDist(sp, p, tip) < 8) return { kind: 'load', id: ld.id };
+      }
+    }
+    for (const dl of this.structure.distLoads) {
+      const bm = this.structure.beams.find((b) => b.id === dl.beam);
+      if (!bm) continue;
+      const a = nodeById(this.structure, bm.nodeI);
+      const b = nodeById(this.structure, bm.nodeJ);
+      if (!a || !b) continue;
+      const pa = this.toScreen(a);
+      const pb = this.toScreen(b);
+      const sign = dl.qy >= 0 ? 1 : -1;
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 12) continue;
+      const nx = (-dy / len) * PX.distArrow * sign;
+      const ny = (dx / len) * PX.distArrow * sign;
+      if (segDist(sp, { x: pa.x + nx, y: pa.y + ny }, { x: pb.x + nx, y: pb.y + ny }) < 10) {
+        return { kind: 'dist', id: dl.id };
+      }
+    }
+    return null;
   }
 
   private hasBeam(a: number, b: number): boolean {
@@ -225,6 +394,7 @@ export class Editor {
       if (!a || !b) return false;
       return inside(a) && inside(b);
     });
+    if (!additive) this.clearItemSelection();
     this.selectedNodes = additive
       ? [...new Set([...this.selectedNodes, ...nodes.map((n) => n.id)])]
       : nodes.map((n) => n.id);
@@ -240,12 +410,24 @@ export class Editor {
   }
 
   deleteSelection(): void {
-    if (this.selectedNodes.length === 0 && this.selectedBeams.length === 0) return;
+    const hasAnything =
+      this.selectedNodes.length > 0 ||
+      this.selectedBeams.length > 0 ||
+      this.selectedSupports.length > 0 ||
+      this.selectedLoads.length > 0 ||
+      this.selectedDist.length > 0;
+    if (!hasAnything) return;
     commit(this.history, this.structure);
+    for (const id of [...this.selectedDist]) removeDistLoad(this.structure, id);
+    for (const id of [...this.selectedLoads]) removePointLoad(this.structure, id);
+    for (const id of [...this.selectedSupports]) removeSupport(this.structure, id);
     for (const id of [...this.selectedBeams]) removeBeam(this.structure, id);
     for (const id of [...this.selectedNodes]) removeNode(this.structure, id);
     this.selectedNodes = [];
     this.selectedBeams = [];
+    this.selectedSupports = [];
+    this.selectedLoads = [];
+    this.selectedDist = [];
     this.emit();
   }
 
@@ -255,6 +437,7 @@ export class Editor {
     this.structure = createStructure();
     this.selectedNodes = [];
     this.selectedBeams = [];
+    this.clearItemSelection();
     this.previewFrom = -1;
     this.preview = null;
     this.emit();
@@ -312,6 +495,13 @@ export class Editor {
     this.selectedNodes = this.selectedNodes.filter((id) => nodeById(this.structure, id));
     this.selectedBeams = this.selectedBeams.filter(
       (id) => this.structure.beams.some((b: Beam) => b.id === id),
+    );
+    this.selectedSupports = this.selectedSupports.filter((id) => nodeById(this.structure, id));
+    this.selectedLoads = this.selectedLoads.filter(
+      (id) => this.structure.loads.some((l) => l.id === id),
+    );
+    this.selectedDist = this.selectedDist.filter(
+      (id) => this.structure.distLoads.some((l) => l.id === id),
     );
   }
 

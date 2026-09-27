@@ -35,6 +35,58 @@
         </section>
 
         <section class="panel">
+          <h2>Támaszok</h2>
+          <div class="tools">
+            <button type="button" data-tool="support" aria-pressed="false">
+              Támasz lerakása <kbd>T</kbd>
+            </button>
+          </div>
+          <div class="segmented" role="group" aria-label="Támasztípus">
+            <button type="button" data-support="pinned" class="active">Csukló</button>
+            <button type="button" data-support="roller">Görgő</button>
+            <button type="button" data-support="fixed">Befogás</button>
+          </div>
+          <p class="hint">
+            Egy csomóponton egy támasz lehet; a szimbólumra kattintva kijelölhető
+            (Del törli).
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Terhek</h2>
+          <div class="tools">
+            <button type="button" data-tool="force" aria-pressed="false">
+              Koncentrált erő <kbd>E</kbd>
+            </button>
+            <button type="button" data-tool="moment" aria-pressed="false">
+              Nyomaték <kbd>M</kbd>
+            </button>
+            <button type="button" data-tool="dist" aria-pressed="false">
+              Megoszló teher <kbd>Q</kbd>
+            </button>
+          </div>
+          <div class="load-inputs">
+            <label class="row">
+              <span>F<sub>x</sub> (kN)</span>
+              <input id="load-fx" type="number" step="1" value="0" />
+            </label>
+            <label class="row">
+              <span>F<sub>y</sub> (kN)</span>
+              <input id="load-fy" type="number" step="1" value="-10" />
+            </label>
+            <label class="row">
+              <span>M (kN·m)</span>
+              <input id="load-mz" type="number" step="1" value="0" />
+            </label>
+            <label class="row">
+              <span>q<sub>y</sub> (kN/m)</span>
+              <input id="load-qy" type="number" step="0.5" value="-5" />
+            </label>
+          </div>
+          <p class="hint">Konc. erő/nyomaték: kattints csomópontra. Megoszló: kattints a rúdra.</p>
+        </section>
+
+        <section class="panel">
           <h2>Rács</h2>
           <label class="row">
             <span>Rácslépés (m)</span>
@@ -61,6 +113,8 @@
           <dl class="stats">
             <div><dt>Csomópont</dt><dd id="stat-nodes">0</dd></div>
             <div><dt>Rúd</dt><dd id="stat-beams">0</dd></div>
+            <div><dt>Támasz</dt><dd id="stat-supports">0</dd></div>
+            <div><dt>Teher</dt><dd id="stat-loads">0</dd></div>
             <div><dt>Teljes hossz</dt><dd id="stat-length">0.00 m</dd></div>
           </dl>
           <div class="tools two">

@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBeam,
+  addDistLoad,
   addNode,
+  addPointLoad,
   createStructure,
   findBeamNear,
   findNodeNear,
   fromJSON,
   pointToSegmentDist,
   removeBeam,
+  removeDistLoad,
   removeNode,
+  removePointLoad,
+  removeSupport,
+  setSupport,
   snap,
   snapPoint,
+  supportAt,
   structureIsConsistent,
   toJSON,
 } from '../src/geometry';
@@ -148,5 +155,187 @@ describe('geometria — mentés / betöltés', () => {
     expect(back.nodes).toEqual(s.nodes);
     expect(back.beams).toEqual(s.beams);
     expect(structureIsConsistent(back)).toBe(true);
+  });
+});
+
+describe('geometria — támaszok', () => {
+  it('támasz csak létező csomópontra kerülhet', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    expect(setSupport(s, 0, 'pinned')).not.toBeNull();
+    expect(setSupport(s, 7, 'pinned')).toBeNull();
+    expect(s.supports).toHaveLength(1);
+  });
+
+  it('egy csomóponton csak egy támasz van: az új felülírja a régit', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    setSupport(s, 0, 'pinned');
+    setSupport(s, 0, 'fixed');
+    expect(s.supports).toHaveLength(1);
+    expect(s.supports[0]!.type).toBe('fixed');
+  });
+
+  it('támasz eltávolítása és a támaszkeresés', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    setSupport(s, 0, 'roller');
+    setSupport(s, 1, 'pinned');
+    expect(supportAt(s, 1)?.type).toBe('pinned');
+    removeSupport(s, 0);
+    expect(s.supports).toHaveLength(1);
+    expect(supportAt(s, 0)).toBeUndefined();
+  });
+
+  it('csomópont törlésekor a támasza és a terhei is eltűnnek, a többiek átirányulnak', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    setSupport(s, 1, 'pinned');
+    setSupport(s, 2, 'roller');
+    addPointLoad(s, 1, 0, -1000, 0);
+    addPointLoad(s, 2, 0, -2000, 0);
+
+    removeNode(s, 1);
+
+    expect(s.supports).toHaveLength(1);
+    expect(s.supports[0]!.node).toBe(1);
+    expect(s.loads).toHaveLength(1);
+    expect(s.loads[0]!.id).toBe(0);
+    expect(s.loads[0]!.node).toBe(1);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+});
+
+describe('geometria — terhek', () => {
+  it('nulla teher nem jön létre', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    expect(addPointLoad(s, 0, 0, 0, 0)).toBeNull();
+    expect(s.loads).toHaveLength(0);
+  });
+
+  it('megoszló teher csak létező rúdra kerülhet', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 2, 0);
+    addBeam(s, 0, 1);
+    expect(addDistLoad(s, 5, -5000)).toBeNull();
+    expect(addDistLoad(s, 0, 0)).toBeNull();
+    expect(addDistLoad(s, 0, -5000)).not.toBeNull();
+  });
+
+  it('megoszló teher eltávolítása', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    addBeam(s, 0, 1);
+    addBeam(s, 1, 2);
+    addDistLoad(s, 0, -5000);
+    addDistLoad(s, 1, -3000);
+    removeDistLoad(s, 0);
+    expect(s.distLoads).toHaveLength(1);
+    expect(s.distLoads[0]!.id).toBe(0);
+    expect(s.distLoads[0]!.beam).toBe(1);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+
+  it('teher eltávolítás után újraszámítódnak az azonosítók', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    addPointLoad(s, 0, 0, -1000, 0);
+    addPointLoad(s, 1, 0, -2000, 0);
+    addPointLoad(s, 2, 0, -3000, 0);
+    removePointLoad(s, 1);
+    expect(s.loads.map((l) => l.id)).toEqual([0, 1]);
+    expect(s.loads.map((l) => l.node)).toEqual([0, 2]);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+
+  it('rúd törlésekor a rúd megoszló terhét is eldobja', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    addBeam(s, 0, 1);
+    addBeam(s, 1, 2);
+    addDistLoad(s, 0, -5000);
+    addDistLoad(s, 1, -3000);
+    removeBeam(s, 0);
+    expect(s.distLoads).toHaveLength(1);
+    expect(s.distLoads[0]!.id).toBe(0);
+    expect(s.distLoads[0]!.beam).toBe(0);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+
+  it('a mentés és visszatöltés a támaszokat és terheket is körbeviszi', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 4, 0);
+    addBeam(s, 0, 1);
+    setSupport(s, 0, 'pinned');
+    setSupport(s, 1, 'roller');
+    addPointLoad(s, 1, 0, -12500, 3000);
+    addDistLoad(s, 0, -5000);
+    const back = fromJSON(toJSON(s));
+    expect(back.supports).toEqual(s.supports);
+    expect(back.loads).toEqual(s.loads);
+    expect(back.distLoads).toEqual(s.distLoads);
+    expect(structureIsConsistent(back)).toBe(true);
+  });
+});
+
+describe('geometria — dangling referenciák', () => {
+  it('csomópont törlésekor az ahhoz tartozó rudak megoszló terhei is eltűnnek', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    addBeam(s, 0, 1);
+    addBeam(s, 1, 2);
+    addDistLoad(s, 0, -5000);
+    addDistLoad(s, 1, -3000);
+
+    removeNode(s, 1);
+
+    expect(s.beams).toHaveLength(0);
+    expect(s.distLoads).toHaveLength(0);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+
+  it('csomópont törlésekor a megmaradó rudak megoszló terhei átirányulnak', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addNode(s, 2, 0);
+    addBeam(s, 1, 2);
+    addBeam(s, 0, 1);
+    addDistLoad(s, 0, -5000);
+    addDistLoad(s, 1, -3000);
+
+    removeNode(s, 0);
+
+    expect(s.beams).toHaveLength(1);
+    expect(s.distLoads).toHaveLength(1);
+    expect(s.distLoads[0]!.id).toBe(0);
+    expect(s.distLoads[0]!.beam).toBe(0);
+    expect(structureIsConsistent(s)).toBe(true);
+  });
+
+  it('a konzisztencia-ellenőrző kiszúrja a lógó hivatkozásokat', () => {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 1, 0);
+    addBeam(s, 0, 1);
+    addPointLoad(s, 0, 0, -1000, 0);
+    const good = structureIsConsistent(s);
+    s.loads[0]!.node = 9;
+    expect(good).toBe(true);
+    expect(structureIsConsistent(s)).toBe(false);
   });
 });
