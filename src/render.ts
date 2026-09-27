@@ -3,6 +3,8 @@ import type { Beam, Structure, SupportType } from './geometry';
 import { materialById, sectionById } from './catalog';
 import { screenToWorld, worldToScreen } from './camera';
 import type { Camera, Viewport } from './camera';
+import type { SolveResult } from './solver';
+import { deformedNode, deformedPointAt } from './solver';
 import type { Point } from './geometry';
 
 export type Tool = 'select' | 'node' | 'beam' | 'support' | 'force' | 'moment' | 'dist';
@@ -28,6 +30,8 @@ export interface SceneState {
   materialId: string;
   sectionId: string;
   selfWeight: boolean;
+  result: SolveResult | null;
+  showDeform: boolean;
   loadValue: { fx: number; fy: number; mz: number; qy: number };
 }
 
@@ -47,6 +51,7 @@ export const COLORS = {
   beamSelected: '#ffd166',
   beamHover: '#a8c8ff',
   node: '#e6edf7',
+  deformed: '#ff7ad9',
   nodeSelected: '#ffd166',
   nodeHover: '#ffffff',
   preview: '#9ad5a0',
@@ -192,6 +197,49 @@ export function drawStructure(ctx: CanvasRenderingContext2D, st: SceneState): vo
   }
 }
 
+/**
+ * A deformált alakzat. A valós elmozdulás milliméteres, ezért a megjelenítés
+ * automatikusan nagyít: a legnagyobb elmozdulás ~120 px lesz a képernyőn.
+ * Visszaadja a nagyítási tényezőt, hogy a felhasználó tudja, mit lát.
+ */
+export function drawDeformed(ctx: CanvasRenderingContext2D, st: SceneState): number {
+  const { structure: s, camera: cam, viewport: vp, result } = st;
+  if (!result || !result.ok || result.maxAbsU <= 0) return 1;
+  const scale = 120 / (result.maxAbsU * cam.zoom);
+
+  // nagyított pont: eredeti + scale · (deformált − eredeti)
+  const exag = (orig: Point, deformed: Point): Point => ({
+    x: orig.x + (deformed.x - orig.x) * scale,
+    y: orig.y + (deformed.y - orig.y) * scale,
+  });
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLORS.deformed;
+  const steps = 12;
+  for (const bm of s.beams) {
+    const a = nodeById(s, bm.nodeI);
+    if (!a) continue;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const xi = i / steps;
+      const sp = worldToScreen(cam, vp, exag(a, deformedPointAt(s, result, bm.id, xi)));
+      if (i === 0) ctx.moveTo(sp.x, sp.y);
+      else ctx.lineTo(sp.x, sp.y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = COLORS.deformed;
+  for (const n of s.nodes) {
+    const sp = worldToScreen(cam, vp, exag(n, deformedNode(s, result, n.id)));
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  return scale;
+}
+
 export function drawPreview(ctx: CanvasRenderingContext2D, st: SceneState): void {
   const { structure: s, camera: cam, viewport: vp, tool } = st;
   if (st.preview === null) return;
@@ -255,6 +303,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: SceneState): void {
   ctx.fillRect(0, 0, st.viewport.width, st.viewport.height);
   drawGrid(ctx, st);
   drawStructure(ctx, st);
+  if (st.showDeform && st.result) drawDeformed(ctx, st);
   drawDistLoads(ctx, st);
   drawSupports(ctx, st);
   drawPointLoads(ctx, st);

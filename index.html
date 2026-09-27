@@ -41,6 +41,44 @@
         </section>
 
         <section class="panel">
+          <h2>Számítás</h2>
+          <div class="tools two">
+            <button type="button" id="btn-solve" class="primary">Számítás</button>
+            <button type="button" id="btn-deform" aria-pressed="false">Alakzat</button>
+          </div>
+          <p class="hint" id="solve-hint">
+            Euler–Bernoulli rúdelem, 3 szabadsági fok csomópontonként. Először
+            oszd fel a rudakat rövidebb elemekre (max. 1 m), ha a lehajlás
+            közepénél fontos a pontosság.
+          </p>
+          <div id="results" hidden>
+            <dl class="stats results">
+              <div><dt>max |N|</dt><dd id="res-n">0 kN</dd></div>
+              <div><dt>max |M|</dt><dd id="res-m">0 kN·m</dd></div>
+              <div><dt>max |V|</dt><dd id="res-v">0 kN</dd></div>
+              <div><dt>max σ</dt><dd id="res-sigma">0 MPa</dd></div>
+              <div><dt>max elmozdulás</dt><dd id="res-u">0 mm</dd></div>
+              <div><dt>max forgatás</dt><dd id="res-theta">0 mrad</dd></div>
+              <div><dt>szab. fok</dt><dd id="res-dof">0 / 0</dd></div>
+              <div><dt>mérleg</dt><dd id="res-balance">—</dd></div>
+            </dl>
+            <table class="table" id="reaction-table">
+              <caption>Reakciók</caption>
+              <thead>
+                <tr>
+                  <th>csomópont</th>
+                  <th>típus</th>
+                  <th>F<sub>x</sub> (kN)</th>
+                  <th>F<sub>y</sub> (kN)</th>
+                  <th>M (kN·m)</th>
+                </tr>
+              </thead>
+              <tbody id="reaction-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
           <h2>Eszköz</h2>
           <div class="tools">
             <button type="button" data-tool="beam" class="active" aria-pressed="true">

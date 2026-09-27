@@ -3,6 +3,7 @@ import { Editor } from '../src/editor';
 import { structureIsConsistent } from '../src/geometry';
 import { screenToWorld, worldToScreen } from '../src/camera';
 import type { Camera, Viewport } from '../src/camera';
+import { deformedNode, deformedPointAt, solve } from '../src/solver';
 
 function makeEditor(): Editor {
   const e = new Editor({ gridStep: 0.25 });
@@ -569,5 +570,78 @@ describe('szerkesztő — anyag és szelvény', () => {
     expect(back.structure.beams[0]!.sectionId).toBe('heb200');
     expect(back.structure.selfWeight).toBe(true);
     expect(back.totalMassAndWeight().mass).toBeCloseTo(e.totalMassAndWeight().mass, 6);
+  });
+});
+
+describe('szerkesztő — számsítás integrációja', () => {
+  /** Két elemes, kétszer raktárasott rúd, q = −5 kN/m. */
+  function supported(): Editor {
+    const e = makeEditor();
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+    drawBeam(e, [
+      { x: 2, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+    e.setTool('support');
+    e.setSupportType('pinned');
+    e.pointerDown({ x: 0, y: 0 });
+    e.setSupportType('roller');
+    e.pointerDown({ x: 4, y: 0 });
+    e.setTool('dist');
+    e.setLoadValue({ qy: -5000 });
+    for (const x of [1, 3]) e.pointerDown({ x, y: 0 });
+    return e;
+  }
+
+  it('a szerkesztő által adott modell pontos eredményt ad', () => {
+    const e = supported();
+    const r = solve(e.structure);
+    expect(r.ok).toBe(true);
+    expect(r.applied.fy).toBeCloseTo(-20000, 6);
+    expect(r.maxM).toBeCloseTo(10000, 3);
+    expect(r.maxV).toBeCloseTo(10000, 3);
+    expect(r.momentBalance.error).toBeLessThan(1e-6);
+  });
+
+  it('a modell módosítása érvényteleníti a korábbi eredményt', () => {
+    const e = supported();
+    e.result = solve(e.structure);
+    expect(e.result).not.toBeNull();
+    e.setTool('force');
+    e.setLoadValue({ fy: -1000 });
+    e.pointerDown({ x: 2, y: 0 });
+    expect(e.result).toBeNull();
+  });
+
+  it('az önsúly bekapcsolása is érvényteleníti az eredményt', () => {
+    const e = supported();
+    e.result = solve(e.structure);
+    e.setSelfWeight(true);
+    expect(e.result).toBeNull();
+  });
+
+  it('a deformált alakzat a támaszokon a helyén marad', () => {
+    const e = supported();
+    const r = solve(e.structure);
+    const left = deformedNode(e.structure, r, 0);
+    expect(left.x).toBeCloseTo(0, 12);
+    expect(left.y).toBeCloseTo(0, 12);
+    const right = deformedNode(e.structure, r, 2);
+    expect(right.x).toBeCloseTo(4, 12);
+    expect(right.y).toBeCloseTo(0, 12);
+    // a középső csomópont lefelé mozdul
+    const mid = deformedNode(e.structure, r, 1);
+    expect(mid.y).toBeLessThan(0);
+  });
+
+  it('a rúd mentén a deformáció végig követhető', () => {
+    const e = supported();
+    const r = solve(e.structure);
+    const mid = deformedPointAt(e.structure, r, 0, 0.5);
+    expect(mid.y).toBeLessThan(0);
+    expect(mid.x).toBeCloseTo(1, 6);
   });
 });

@@ -2,6 +2,7 @@ import './style.css';
 import { screenToWorld } from './camera';
 import { Editor } from './editor';
 import { drawScene } from './render';
+import { solve } from './solver';
 import type { Tool } from './render';
 import type { SupportType } from './geometry';
 
@@ -29,6 +30,18 @@ const materialSelect = el<HTMLSelectElement>('#material-select');
 const sectionSelect = el<HTMLSelectElement>('#section-select');
 const selfWeightBox = el<HTMLInputElement>('#self-weight');
 const sectionHint = el<HTMLElement>('#section-hint');
+const btnSolve = el<HTMLButtonElement>('#btn-solve');
+const btnDeform = el<HTMLButtonElement>('#btn-deform');
+const resultsBox = el<HTMLElement>('#results');
+const resN = el<HTMLElement>('#res-n');
+const resM = el<HTMLElement>('#res-m');
+const resV = el<HTMLElement>('#res-v');
+const resSigma = el<HTMLElement>('#res-sigma');
+const resU = el<HTMLElement>('#res-u');
+const resTheta = el<HTMLElement>('#res-theta');
+const resDof = el<HTMLElement>('#res-dof');
+const resBalance = el<HTMLElement>('#res-balance');
+const reactionBody = el<HTMLTableSectionElement>('#reaction-body');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const supportButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-support]'));
 const loadFx = el<HTMLInputElement>('#load-fx');
@@ -81,6 +94,13 @@ function refresh(): void {
   statWeight.textContent = `${weight.toFixed(2)} kN`;
   btnUndo.disabled = !editor.undoAvailable();
   btnRedo.disabled = !editor.redoAvailable();
+  btnDeform.disabled = editor.result === null;
+  if (editor.result === null) {
+    resultsBox.hidden = true;
+    btnDeform.classList.remove('active');
+    btnDeform.setAttribute('aria-pressed', 'false');
+    editor.showDeform = false;
+  }
   const hasSel =
     editor.selectedNodes.length > 0 ||
     editor.selectedBeams.length > 0 ||
@@ -349,6 +369,88 @@ function syncSectionPanel(): void {
       ? `Kijelölt rúd: ${n} db — a választás rájuk is rákerül.`
       : 'Nincs kijelölt rúd — a választás az új rudak alapértéke lesz.';
 }
+
+const kN = (v: number): string => (v / 1000).toFixed(2);
+const kNm = (v: number): string => (v / 1000).toFixed(2);
+const MPa = (v: number): string => (v / 1e6).toFixed(1);
+const mm = (v: number): string => (v * 1000).toFixed(2);
+const mrad = (v: number): string => (v * 1000).toFixed(3);
+
+const SUPPORT_LABEL: Record<SupportType, string> = {
+  pinned: 'csukló',
+  roller: 'görgő',
+  fixed: 'befogás',
+};
+
+function runSolve(): void {
+  const r = solve(editor.structure);
+  editor.result = r;
+  if (!r.ok) {
+    resultsBox.hidden = true;
+    btnDeform.disabled = true;
+    setMessage(r.error ?? 'A számítás nem sikerült.');
+    draw();
+    return;
+  }
+  resN.textContent = `${kN(r.maxN)} kN`;
+  resM.textContent = `${kNm(r.maxM)} kN·m`;
+  resV.textContent = `${kN(r.maxV)} kN`;
+  resSigma.textContent = `${MPa(r.maxSigma)} MPa`;
+  resU.textContent = `${mm(r.maxAbsU)} mm`;
+  resTheta.textContent = `${mrad(r.maxAbsTheta)} mrad`;
+  resDof.textContent = `${r.dof.fixed} / ${r.dof.total}`;
+  const scale = Math.max(1, Math.abs(r.momentBalance.applied));
+  const rel = r.momentBalance.error / scale;
+  resBalance.textContent = rel < 1e-6 ? 'zárt' : `eltérés ${rel.toExponential(1)}`;
+
+  reactionBody.innerHTML = '';
+  for (const rx of r.reactions) {
+    const tr = document.createElement('tr');
+    for (const text of [
+      `#${rx.node + 1}`,
+      SUPPORT_LABEL[rx.type],
+      kN(rx.fx),
+      kN(rx.fy),
+      kNm(rx.mz),
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.append(td);
+    }
+    reactionBody.append(tr);
+  }
+  resultsBox.hidden = false;
+  btnDeform.disabled = false;
+  setMessage('Számsítás kész. Az „Alakzat” gomb mutatja a deformációt.');
+  draw();
+}
+
+btnSolve.addEventListener('click', runSolve);
+
+btnDeform.addEventListener('click', () => {
+  if (!editor.result) return;
+  editor.showDeform = !editor.showDeform;
+  btnDeform.classList.toggle('active', editor.showDeform);
+  btnDeform.setAttribute('aria-pressed', String(editor.showDeform));
+  if (editor.showDeform) {
+    const r = editor.result;
+    const cam = editor.camera;
+    const factor = r.maxAbsU > 0 ? 120 / (r.maxAbsU * cam.zoom) : 1;
+    setMessage(
+      `Deformált alakzat, ${factor.toLocaleString('hu-HU', { maximumFractionDigits: 0 })}-szoros nagyítással.`,
+    );
+  } else {
+    setMessage('Eredeti alakzat.');
+  }
+  draw();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.ctrlKey) {
+    e.preventDefault();
+    runSolve();
+  }
+});
 
 fillCatalogSelects();
 syncSectionPanel();

@@ -6,7 +6,7 @@ Az alkalmazás első lépése a rajzolás: a felhasználó a vászonra felrajzol
 csomópontokból és rudakból. Ez a rajz a későbbi FEM-számítás geometriai bemenete —
 a modellezés nem előre gyárilag sávolt sablonokból indul, hanem abból, amit rajzolsz.
 
-## Most (3. iteráció): a rajzoló + támaszok/terhek + anyag/szelvény
+## Most (4. iteráció): rajzoló + támaszok/terhek + katalógus + 1D váz-szolver
 
 - **Rúd eszköz** — kattints a kezdőpontra, majd a végpontokra; a lánc folytatódik
   (Esc vagy dupla kattintás zárja). A meglévő csomópontra kattintva az ahhoz csatlakozik,
@@ -39,6 +39,27 @@ N/m) tárol — így a szolverhez nem kell konverzió.
   alapértéke lesz. A rúd vonalvastagsága a keresztmetszet területét követi.
 - Élő **tömeg és súly** statisztika (A·ρ·L, illetve ·g), plusz **önsúly**
   kapcsoló a szolverhez.
+
+### Számítás (1D váz-szolver)
+
+A **Számítás** gomb megoldja a szerkezetet: Euler–Bernoulli rúdelem, csomópontonként
+3 szabadsági fok (ux, uy, θz), a rúd két végén a nyomaték nem esik ki. A számsítás
+magja a `src/solver.ts`, a lineáris egyenletrendszert a `src/linalg.ts` oldja
+(Gauss-elimináció, részleges pivotálás).
+
+Eredmények: reakciók, max |N|, |V|, |M|, σ, elmozdulás, forgatás, szabadsági fokok
+száma — és a **mérlegellenőrzés**: a terhek és a reakciók globális momentummérlege
+a kezdőpont körül. Hibátlan megoldásnál a relatív eltérés 1e-15 nagyságrendű, ezt a
+tesztek is ellenőrzik.
+
+Az **Alakzat** gomb a deformált alakzatot rajzolja, automatikus nagyítással
+(ezt az üzenetsor kiírja) — a valós lehajlás mm-es, a képernyőn láthatóvá kell
+nagyítani.
+
+**Pontosság:** egyetlen rúdelem a megoszló teher okozta lehajlás közepén csak ~80%-ot
+ad (a pontos alak kvartikus, az elem kubikus). Ha a lehajlás számít, oszd fel a
+rudakat 1 m-nél kisebb elemekre — a reakciók és a csomóponti elmozdulások ettől
+függetlenül mindig pontosak.
 
 ### Adatmodell
 

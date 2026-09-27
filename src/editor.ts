@@ -27,6 +27,7 @@ import { assignBeams, defaultMaterialId, defaultSectionId, massAndWeight } from 
 import { canRedo, canUndo, commit, createHistory, redo, undo } from './history';
 import type { HistoryState } from './history';
 import type { SceneState, Tool } from './render';
+import type { SolveResult } from './solver';
 import { worldToScreen } from './camera';
 import { PX } from './render';
 
@@ -69,6 +70,9 @@ export class Editor {
   supportType: SupportType = 'pinned';
   materialId = '';
   sectionId = '';
+  /** A legutóbbi száítás eredménye; a modell módosításakor érvénytelenítjük. */
+  result: SolveResult | null = null;
+  showDeform = false;
   loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
   hoverNode = -1;
   hoverBeam = -1;
@@ -120,6 +124,8 @@ export class Editor {
       materialId: this.materialId,
       sectionId: this.sectionId,
       selfWeight: this.structure.selfWeight,
+      result: this.result,
+      showDeform: this.showDeform,
     };
   }
 
@@ -150,7 +156,7 @@ export class Editor {
     const targets = this.selectedBeams;
     let applied = 0;
     if (targets.length > 0) {
-      commit(this.history, this.structure);
+      this.snapshot();
       applied = assignBeams(this.structure, targets, materialId, sectionId);
     }
     if (materialId) this.materialId = materialId;
@@ -161,6 +167,7 @@ export class Editor {
 
   setSelfWeight(on: boolean): void {
     this.structure.selfWeight = on;
+    this.invalidateResult();
     this.emit();
   }
 
@@ -171,6 +178,17 @@ export class Editor {
   setLoadValue(v: Partial<LoadValues>): void {
     this.loadValue = { ...this.loadValue, ...v };
     this.emit();
+  }
+
+  /** A modell megváltozott: a korábbi eredmény már nem érvényes. */
+  invalidateResult(): void {
+    this.result = null;
+  }
+
+  /** Előzmény-mentés a modell módosítása előtt, az eredmény érvénytelenítésével. */
+  private snapshot(): void {
+    this.invalidateResult();
+    commit(this.history, this.structure);
   }
 
   private toScreen(p: Point): Point {
@@ -208,7 +226,7 @@ export class Editor {
     this.dragMoved = false;
 
     if (this.tool === 'node') {
-      commit(this.history, this.structure);
+      this.snapshot();
       addNode(this.structure, w.x, w.y);
       this.emit();
       return;
@@ -217,7 +235,7 @@ export class Editor {
     if (this.tool === 'beam') {
       const near = findNodeNear(this.structure, w, this.tol());
       if (this.previewFrom < 0) {
-        if (!near) commit(this.history, this.structure);
+        if (!near) this.snapshot();
         this.previewFrom = near ? near.id : addNode(this.structure, w.x, w.y);
         this.emit();
         return;
@@ -227,11 +245,11 @@ export class Editor {
       if (near) {
         to = near.id;
       } else {
-        commit(this.history, this.structure);
+        this.snapshot();
         to = addNode(this.structure, w.x, w.y);
       }
       if (from !== to && !this.hasBeam(from, to)) {
-        if (near) commit(this.history, this.structure);
+        if (near) this.snapshot();
         addBeam(this.structure, from, to, this.materialId, this.sectionId);
       }
       this.previewFrom = to;
@@ -242,7 +260,7 @@ export class Editor {
     if (this.tool === 'support') {
       const near = findNodeNear(this.structure, w, this.tol());
       if (!near) return;
-      commit(this.history, this.structure);
+      this.snapshot();
       setSupport(this.structure, near.id, this.supportType);
       this.emit();
       return;
@@ -256,7 +274,7 @@ export class Editor {
       const useFy = this.tool === 'force' ? fy : 0;
       const useMz = this.tool === 'moment' ? mz : 0;
       if (useFx === 0 && useFy === 0 && useMz === 0) return;
-      commit(this.history, this.structure);
+      this.snapshot();
       addPointLoad(this.structure, near.id, useFx, useFy, useMz);
       this.emit();
       return;
@@ -265,7 +283,7 @@ export class Editor {
     if (this.tool === 'dist') {
       const near = findBeamNear(this.structure, w, this.tol());
       if (!near || this.loadValue.qy === 0) return;
-      commit(this.history, this.structure);
+      this.snapshot();
       addDistLoad(this.structure, near.id, this.loadValue.qy);
       this.emit();
       return;
@@ -279,7 +297,7 @@ export class Editor {
       if (!this.selectedNodes.includes(nearNode.id)) {
         this.selectedNodes = [nearNode.id];
       }
-      commit(this.history, this.structure);
+      this.snapshot();
       this.emit();
       return;
     }
@@ -465,7 +483,7 @@ export class Editor {
       this.selectedLoads.length > 0 ||
       this.selectedDist.length > 0;
     if (!hasAnything) return;
-    commit(this.history, this.structure);
+    this.snapshot();
     for (const id of [...this.selectedDist]) removeDistLoad(this.structure, id);
     for (const id of [...this.selectedLoads]) removePointLoad(this.structure, id);
     for (const id of [...this.selectedSupports]) removeSupport(this.structure, id);
@@ -481,8 +499,9 @@ export class Editor {
 
   clearAll(): void {
     if (this.structure.nodes.length === 0) return;
-    commit(this.history, this.structure);
+    this.snapshot();
     this.structure = createStructure();
+    this.invalidateResult();
     this.materialId = defaultMaterialId(this.structure);
     this.sectionId = defaultSectionId(this.structure);
     this.selectedNodes = [];
@@ -564,8 +583,9 @@ export class Editor {
       const parsed = JSON.parse(text) as ReturnType<typeof toJSON>;
       const s = fromJSON(parsed);
       if (!structureIsConsistent(s)) return false;
-      commit(this.history, this.structure);
+      this.snapshot();
       this.structure = s;
+      this.invalidateResult();
       this.syncCatalogSelection();
       this.pruneSelection();
       this.emit();
@@ -577,7 +597,7 @@ export class Editor {
 
   duplicateSelection(): void {
     if (this.selectedBeams.length === 0) return;
-    commit(this.history, this.structure);
+    this.snapshot();
     for (const id of [...this.selectedBeams]) {
       const bm = this.structure.beams.find((b) => b.id === id);
       if (!bm) continue;

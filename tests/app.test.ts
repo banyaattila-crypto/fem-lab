@@ -82,6 +82,20 @@ describe('app wiring', () => {
       'section-select',
       'self-weight',
       'section-hint',
+      'btn-solve',
+      'btn-deform',
+      'solve-hint',
+      'results',
+      'res-n',
+      'res-m',
+      'res-v',
+      'res-sigma',
+      'res-u',
+      'res-theta',
+      'res-dof',
+      'res-balance',
+      'reaction-table',
+      'reaction-body',
       'load-mz',
       'load-qy',
     ];
@@ -139,6 +153,15 @@ describe('app wiring', () => {
     expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Önsúly');
     expect(document.querySelector<HTMLElement>('#stat-weight')?.textContent).toBe('0.00 kN');
     expect(document.querySelector<HTMLElement>('#stat-mass')?.textContent).toBe('0 kg');
+  });
+
+  it('üres modellen a számítás magyar hibaüzenetet ad', async () => {
+    await import('../src/main');
+    document.querySelector<HTMLButtonElement>('#btn-solve')?.click();
+    const msg = document.querySelector<HTMLElement>('#message')?.textContent ?? '';
+    expect(msg).toMatch(/Üres|nincs mit számolni/i);
+    expect(document.querySelector<HTMLElement>('#results')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('#btn-deform')?.disabled).toBe(true);
   });
 
   it('a támasztípus-választó kijelöli az aktív típust', async () => {
