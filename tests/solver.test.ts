@@ -11,7 +11,8 @@ import {
   structureIsConsistent,
 } from '../src/geometry';
 import type { Structure } from '../src/geometry';
-import { deformedPointAt, dof, localTransverseAt, momentAt, solve } from '../src/solver';
+import { sectionProps } from '../src/catalog';
+import { deformedNode, deformedPointAt, dof, extremes, internalAt, localTransverseAt, momentAt, solve } from '../src/solver';
 
 const E = 210e9;
 /** szelvény: 15×15 cm téglalap, S235 */
@@ -357,5 +358,92 @@ describe('szolver — hibás vagy hiányos modellek', () => {
     const s = cantilever();
     solve(s);
     expect(structureIsConsistent(s)).toBe(true);
+  });
+});
+
+describe('szolver — belső erők a rúd mentén', () => {
+  it('a visszanyert diagram egyezik az elem végponti értékeivel', () => {
+    const s = chain(2);
+    const r = solve(s);
+    expect(r.ok).toBe(true);
+    for (const e of r.elements) {
+      const start = internalAt(s, r, e.beam, 0);
+      const end = internalAt(s, r, e.beam, 1);
+      expect(start.V).toBeCloseTo(e.V[0], 6);
+      expect(start.M).toBeCloseTo(e.M[0], 6);
+      expect(start.N).toBeCloseTo(e.N[0], 6);
+      expect(end.V).toBeCloseTo(e.V[1], 6);
+      expect(end.M).toBeCloseTo(e.M[1], 6);
+      expect(end.N).toBeCloseTo(e.N[1], 6);
+    }
+  });
+
+  it('a nyomatékdiagram megoszló terhelésnél kvadratikus', () => {
+    const s = chain(1);
+    const r = solve(s);
+    // egyetlen elem, q = -5 kN/m: az elemi végponti M mindkét végen nulla,
+    // a valódi maximum viszont középen q*L²/8
+    expect(r.elements[0]!.M[0]).toBeCloseTo(0, 6);
+    expect(r.elements[0]!.M[1]).toBeCloseTo(0, 6);
+    const mid = internalAt(s, r, 0, 0.5);
+    expect(Math.abs(mid.M)).toBeCloseTo(10000, 3);
+    expect(r.maxM).toBeCloseTo(10000, 3);
+  });
+
+  it('a nyomaték maximuma és helye a vertexben van', () => {
+    const s = chain(1);
+    const r = solve(s);
+    const ex = extremes(s, r, 0);
+    expect(ex.maxM.xi).toBeCloseTo(0.5, 6);
+    expect(Math.abs(ex.maxM.value)).toBeCloseTo(10000, 3);
+  });
+});
+
+describe('szolver — ferde és függőleges rúd', () => {
+  /** Függőleges konzol, tetején befogva, alján vízszintes teher: oldalirányú lehajlás. */
+  function verticalCantilever(): Structure {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 0, -3);
+    addBeam(s, 0, 1);
+    assignBeams(s, [0], 's235', 'sq150');
+    setSupport(s, 0, 'fixed');
+    addPointLoad(s, 1, -1000, 0, 0);
+    return s;
+  }
+
+  it('a függőleges rúd csúcsa a teher irányában mozdul', () => {
+    const s = verticalCantilever();
+    const r = solve(s);
+    expect(r.ok).toBe(true);
+    // a csúcs a vízszintes teher irányába mozdul, a vízszintes helyzete változatlan
+    const tip = deformedNode(s, r, 1);
+    expect(tip.x).toBeLessThan(0);
+    expect(tip.y).toBeCloseTo(-3, 12);
+  });
+
+  it('a csúcs lehajlása megegyezik a PL³/(3EI) értékkel', () => {
+    const s = verticalCantilever();
+    const E = s.catalog.materials.find((m) => m.id === 's235')!.E;
+    const sec = sectionProps(s.catalog.sections.find((x) => x.id === 'sq150')!);
+    const expected = -(1000 * 27) / (3 * E * sec.I);
+    const r = solve(s);
+    expect(deformedNode(s, r, 1).x).toBeCloseTo(expected, 12);
+  });
+
+  it('a függőleges rúd alakja a csúcs felé monoton görbül', () => {
+    const s = verticalCantilever();
+    const r = solve(s);
+    let prev = 0;
+    for (let k = 1; k <= 10; k++) {
+      const xi = k / 10;
+      const p = deformedPointAt(s, r, 0, xi);
+      // a rúd függőleges marad: a lehajlás mindenütt vízszintes
+      expect(p.y).toBeCloseTo(-3 * xi, 12);
+      expect(p.x).toBeLessThan(0);
+      // a lehajlás a csúcs felé nő
+      expect(-p.x).toBeGreaterThan(prev);
+      prev = -p.x;
+    }
   });
 });

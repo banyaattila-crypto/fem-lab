@@ -84,6 +84,9 @@ describe('app wiring', () => {
       'section-hint',
       'btn-solve',
       'btn-deform',
+      'btn-diag-n',
+      'btn-diag-v',
+      'btn-diag-m',
       'solve-hint',
       'results',
       'res-n',
@@ -153,6 +156,12 @@ describe('app wiring', () => {
     expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Önsúly');
     expect(document.querySelector<HTMLElement>('#stat-weight')?.textContent).toBe('0.00 kN');
     expect(document.querySelector<HTMLElement>('#stat-mass')?.textContent).toBe('0 kg');
+  });
+
+  it('a diagramgombok számsítás előtt tiltottak, utána kapcsolhatók', async () => {
+    await import('../src/main');
+    const n = document.querySelector<HTMLButtonElement>('#btn-diag-n')!;
+    expect(n.disabled).toBe(true);
   });
 
   it('üres modellen a számítás magyar hibaüzenetet ad', async () => {

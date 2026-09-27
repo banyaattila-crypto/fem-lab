@@ -42,6 +42,11 @@ const resTheta = el<HTMLElement>('#res-theta');
 const resDof = el<HTMLElement>('#res-dof');
 const resBalance = el<HTMLElement>('#res-balance');
 const reactionBody = el<HTMLTableSectionElement>('#reaction-body');
+const diagButtons = {
+  n: el<HTMLButtonElement>('#btn-diag-n'),
+  v: el<HTMLButtonElement>('#btn-diag-v'),
+  m: el<HTMLButtonElement>('#btn-diag-m'),
+};
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const supportButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-support]'));
 const loadFx = el<HTMLInputElement>('#load-fx');
@@ -95,11 +100,18 @@ function refresh(): void {
   btnUndo.disabled = !editor.undoAvailable();
   btnRedo.disabled = !editor.redoAvailable();
   btnDeform.disabled = editor.result === null;
+  for (const b of Object.values(diagButtons)) b.disabled = editor.result === null;
   if (editor.result === null) {
     resultsBox.hidden = true;
     btnDeform.classList.remove('active');
     btnDeform.setAttribute('aria-pressed', 'false');
     editor.showDeform = false;
+    for (const [kind, b] of Object.entries(diagButtons)) {
+      const key = kind === 'n' ? 'showDiagN' : kind === 'v' ? 'showDiagV' : 'showDiagM';
+      editor[key] = false;
+      b.classList.remove('active');
+      b.setAttribute('aria-pressed', 'false');
+    }
   }
   const hasSel =
     editor.selectedNodes.length > 0 ||
@@ -388,6 +400,7 @@ function runSolve(): void {
   if (!r.ok) {
     resultsBox.hidden = true;
     btnDeform.disabled = true;
+    for (const b of Object.values(diagButtons)) b.disabled = true;
     setMessage(r.error ?? 'A számítás nem sikerült.');
     draw();
     return;
@@ -421,11 +434,25 @@ function runSolve(): void {
   }
   resultsBox.hidden = false;
   btnDeform.disabled = false;
+  for (const b of Object.values(diagButtons)) b.disabled = false;
   setMessage('Számsítás kész. Az „Alakzat” gomb mutatja a deformációt.');
   draw();
 }
 
 btnSolve.addEventListener('click', runSolve);
+
+for (const kind of ['n', 'v', 'm'] as const) {
+  diagButtons[kind].addEventListener('click', () => {
+    if (!editor.result) return;
+    const key = kind === 'n' ? 'showDiagN' : kind === 'v' ? 'showDiagV' : 'showDiagM';
+    editor[key] = !editor[key];
+    diagButtons[kind].classList.toggle('active', editor[key]);
+    diagButtons[kind].setAttribute('aria-pressed', String(editor[key]));
+    const on = (['n', 'v', 'm'] as const).filter((k) => editor[k === 'n' ? 'showDiagN' : k === 'v' ? 'showDiagV' : 'showDiagM']);
+    setMessage(on.length ? `Diagramok: ${on.map((k) => k.toUpperCase()).join(', ')}` : 'Diagramok kikapcsolva.');
+    draw();
+  });
+}
 
 btnDeform.addEventListener('click', () => {
   if (!editor.result) return;

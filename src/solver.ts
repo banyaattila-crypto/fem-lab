@@ -28,6 +28,13 @@ export interface ElementResult {
   M: [number, number];
   /** legnagyobb feszültség a rúdban (Pa) */
   sigmaMax: number;
+  /** a rúd két végén átadott csomóponti erők/nyomatékok (a szomszéd rúd felől jönnek) */
+  endForces: {
+    i: { f: number; n: number; m: number };
+    j: { f: number; n: number; m: number };
+  };
+  /** a rúd mentén ható megoszló terhek összege (N/m, lokális keresztirányú) */
+  distributed: number[];
 }
 
 export interface Reaction {
@@ -63,6 +70,10 @@ export interface SolveResult {
    * `applied` és `reaction` a nyomatékra is egyenlő nagyságú, ellenkező előjellel.
    */
   momentBalance: { applied: number; reaction: number; error: number };
+}
+
+function rhoOf(s: Structure, bm: Beam): number {
+  return s.catalog.materials.find((m) => m.id === bm.materialId)?.rho ?? 0;
 }
 
 interface ElementProps {
@@ -349,7 +360,9 @@ export function solve(s: Structure): SolveResult {
   }
 
   // 7. Elemi belső erők
+  const collected = [...s.distLoads];
   const elements: ElementResult[] = [];
+  const propsOf = new Map<number, ElementProps>();
   let maxN = 0;
   let maxV = 0;
   let maxM = 0;
@@ -396,11 +409,44 @@ export function solve(s: Structure): SolveResult {
     // legnagyobb feszültség: N/A + M/W, ahol W = I/yMax
     const sigmaEnd = (Nn: number, Mm: number): number => Math.abs(Nn) / p.A + (Math.abs(Mm) * p.yMax) / p.I;
     const sigmaMax = Math.max(sigmaEnd(N, M), sigmaEnd(Nj, Mj));
-    elements.push({ beam: p.beam.id, length: p.L, N: [N, Nj], V: [V, Vj], M: [M, Mj], sigmaMax });
-    maxN = Math.max(maxN, Math.abs(N), Math.abs(Nj));
-    maxV = Math.max(maxV, Math.abs(V), Math.abs(Vj));
-    maxM = Math.max(maxM, Math.abs(M), Math.abs(Mj));
-    maxSigma = Math.max(maxSigma, sigmaMax);
+    const endForces = {
+      i: { f: -V, n: -N, m: -M },
+      j: { f: V, n: N, m: M },
+    };
+    const distributed = collected
+      .filter((d) => d.beam === p.beam.id)
+      .map((d) => d.qy * p.cos)
+      .concat(s.selfWeight ? [-p.A * rhoOf(s, p.beam) * GRAVITY * p.cos] : []);
+    elements.push({
+      beam: p.beam.id,
+      length: p.L,
+      N: [N, Nj],
+      V: [V, Vj],
+      M: [M, Mj],
+      sigmaMax,
+      endForces,
+      distributed,
+    });
+    propsOf.set(p.beam.id, p);
+  }
+
+  // A maximumokat a rúd MENTÉN érdemes keresni, nem csak a végpontokban: egy
+  //etlen elemnél a megoszló teher miatt a legnagyobb nyomaték a középen van.
+  const STEP = 32;
+  for (const e of elements) {
+    const p = propsOf.get(e.beam)!;
+    const q = e.distributed.reduce((t, v) => t + v, 0);
+    const L = e.length;
+    for (let k = 0; k <= STEP; k++) {
+      const x = (k / STEP) * L;
+      const V = -e.endForces.i.f + q * x;
+      const M = -e.endForces.i.m + e.endForces.i.f * x - (q * x * x) / 2;
+      const N = -e.endForces.i.n;
+      maxN = Math.max(maxN, Math.abs(N));
+      maxV = Math.max(maxV, Math.abs(V));
+      maxM = Math.max(maxM, Math.abs(M));
+      maxSigma = Math.max(maxSigma, Math.abs(N) / p.A + (Math.abs(M) * p.yMax) / p.I);
+    }
   }
 
   // a teljes külső teher: a konzisztens nodal terhelésvektorok összege
@@ -418,6 +464,19 @@ export function solve(s: Structure): SolveResult {
   for (let n = 0; n < s.nodes.length; n++) {
     maxAbsU = Math.max(maxAbsU, Math.hypot(u[dof(n, 0)]!, u[dof(n, 1)]!));
     maxAbsTheta = Math.max(maxAbsTheta, Math.abs(u[dof(n, 2)]!));
+  }
+  // a lehajlás maximuma a rúd közepén is lehet (valódi alak kvartikus, a Hermite-
+  // elem csak kubikus), ezért a rúd mentén is végig kell nézni
+  for (const e of elements) {
+    const bm = s.beams[e.beam]!;
+    const a = nodeById(s, bm.nodeI)!;
+    const b = nodeById(s, bm.nodeJ)!;
+    for (let k = 1; k < STEP; k++) {
+      const xi = k / STEP;
+      const base = { x: a.x + xi * (b.x - a.x), y: a.y + xi * (b.y - a.y) };
+      const d = shapePoint(s, u, e.beam, xi);
+      maxAbsU = Math.max(maxAbsU, Math.hypot(d.x - base.x, d.y - base.y));
+    }
   }
 
   return {
@@ -467,30 +526,44 @@ export function deformedPointAt(s: Structure, res: SolveResult, beamId: number, 
   x: number;
   y: number;
 } {
-  const bm = s.beams.find((b) => b.id === beamId)!;
+  return shapePoint(s, res.u, beamId, xi);
+}
+
+/**
+ * A rúd alakja a Hermite-függvényekkel, nyers elmozdulásvektorból.
+ *
+ * A két végpont globális elmozdulását lineárisan keverjük — ez a rúd merev testként
+ * való elmozdulását adja. A keresztirányú Hermite-alak viszont már tartalmazza a
+ * végponti keresztirányú elmozdulásokat is, ezért csak a TISZTA hajlítási részt
+ * szabad hozzáadni, a rúd helyi y' tengelye mentén (az y' a (cos, sin) irányra
+ * merőleges, vagyis (−sin, cos)). Duplán számolva a végponti elmozdulás kétszer
+ * jelentkezne, és ferde rúdnál a két keverés különböző lenne.
+ */
+function shapePoint(s: Structure, u: number[], beamId: number, xi: number): { x: number; y: number } {
+  const bm = s.beams[beamId]!;
   const a = nodeById(s, bm.nodeI)!;
   const b = nodeById(s, bm.nodeJ)!;
   const L = beamLength(s, bm);
   // a DOF-sorszám a csomópont számából képződik, nem a szomszéd számozásából
-  const ul = [
-    res.u[dof(bm.nodeI, 0)]!,
-    res.u[dof(bm.nodeI, 1)]!,
-    res.u[dof(bm.nodeI, 2)]!,
-    res.u[dof(bm.nodeJ, 0)]!,
-    res.u[dof(bm.nodeJ, 1)]!,
-    res.u[dof(bm.nodeJ, 2)]!,
-  ];
-  const ax = (1 - xi) * ul[0]! + xi * ul[3]!;
-  const theta = (b.y - a.y) / L;
-  const phi = (b.x - a.x) / L;
+  const uxi = u[dof(bm.nodeI, 0)]!;
+  const uyi = u[dof(bm.nodeI, 1)]!;
+  const uxj = u[dof(bm.nodeJ, 0)]!;
+  const uyj = u[dof(bm.nodeJ, 1)]!;
+  const ul = [uxi, uyi, u[dof(bm.nodeI, 2)]!, uxj, uyj, u[dof(bm.nodeJ, 2)]!];
+  const ux = (1 - xi) * uxi + xi * uxj;
+  const uy = (1 - xi) * uyi + xi * uyj;
+  const sin = (b.y - a.y) / L;
+  const cos = (b.x - a.x) / L;
+  // a teljes keresztirányú alak és annak lineáris (végponti) része
   const v = localTransverseAt(ul, L, xi);
+  const vLin = (1 - xi) * ul[1]! + xi * ul[4]!;
+  const bend = v - vLin;
   return {
-    x: a.x + xi * (b.x - a.x) + ax * phi - v * theta,
-    y: a.y + xi * (b.y - a.y) + ax * theta + v * phi,
+    x: a.x + xi * (b.x - a.x) + ux - bend * sin,
+    y: a.y + xi * (b.y - a.y) + uy + bend * cos,
   };
 }
 
-/** A rúd elmozdulásai a két végén — a csomópontok pozícióinak frissítéséhez. */
 export function deformedNode(s: Structure, res: SolveResult, node: number): { x: number; y: number } {
   const n = nodeById(s, node)!;
   return { x: n.x + res.u[dof(node, 0)]!, y: n.y + res.u[dof(node, 1)]! };
@@ -515,4 +588,62 @@ export function shearAt(res: SolveResult, beamId: number): number {
 export function axialAt(res: SolveResult, beamId: number, xi: number): number {
   const e = res.elements.find((el) => el.beam === beamId)!;
   return e.N[0]! * (1 - xi) + e.N[1]! * xi;
+}
+
+/**
+ * A belső erők visszanyerése a rúd mentén tetszőleges helyen. A diagramok és a
+ * feszültség-ellenőrzés ezt használja, nem a csomóponti értékeket.
+ *
+ * Az elem két végén a szomszédos elemekről átadott erők is hatnak, ezért a
+ * diagram a `endForces` értékéből és a megoszló teherről épül fel. Az
+ * `endForces.i` a CSOMÓPONTnak az elemre kifejtett ereje, ezért a belső erő
+ * ennek ellentettje:
+ *   V(x) = −f_i + q·x
+ *   M(x) = −m_i + f_i·x − q·x²/2
+ *   N(x) = −n_i
+ * A hajlítási nyomaték előjele e konvencióban a pozitív (alulról felfelé hajlító)
+ * nyomatéknak negatív — a `V(x) = dM/dx` összefüggés ezzel zárul.
+ */
+export function internalAt(
+  s: Structure,
+  res: SolveResult,
+  beamId: number,
+  xi: number,
+): { N: number; V: number; M: number; sigma: number } {
+  const e = res.elements.find((el) => el.beam === beamId);
+  const bm = s.beams.find((b) => b.id === beamId);
+  if (!e || !bm) return { N: 0, V: 0, M: 0, sigma: 0 };
+  const sec = sectionById(s.catalog, bm.sectionId);
+  const props = sec ? sectionProps(sec) : { A: 1, I: 1, yBot: 0, yTop: 0 };
+  const x = xi * e.length;
+  const q = e.distributed.reduce((t, v) => t + v, 0);
+  const V = -e.endForces.i.f + q * x;
+  const M = -e.endForces.i.m + e.endForces.i.f * x - (q * x * x) / 2;
+  const N = -e.endForces.i.n;
+  return { N, V, M, sigma: Math.abs(N) / props.A + (Math.abs(M) * Math.max(props.yBot, props.yTop)) / props.I };
+}
+
+/** A rúd mentén a belső erők maximuma és a helye (xi = 0…1). */
+export function extremes(s: Structure, res: SolveResult, beamId: number): {
+  maxN: { value: number; xi: number };
+  maxV: { value: number; xi: number };
+  maxM: { value: number; xi: number };
+  maxSigma: { value: number; xi: number };
+} {
+  const steps = 48;
+  const acc = {
+    maxN: { value: 0, xi: 0 },
+    maxV: { value: 0, xi: 0 },
+    maxM: { value: 0, xi: 0 },
+    maxSigma: { value: 0, xi: 0 },
+  };
+  for (let i = 0; i <= steps; i++) {
+    const xi = i / steps;
+    const v = internalAt(s, res, beamId, xi);
+    if (Math.abs(v.N) > Math.abs(acc.maxN.value)) acc.maxN = { value: v.N, xi };
+    if (Math.abs(v.V) > Math.abs(acc.maxV.value)) acc.maxV = { value: v.V, xi };
+    if (Math.abs(v.M) > Math.abs(acc.maxM.value)) acc.maxM = { value: v.M, xi };
+    if (Math.abs(v.sigma) > Math.abs(acc.maxSigma.value)) acc.maxSigma = { value: v.sigma, xi };
+  }
+  return acc;
 }

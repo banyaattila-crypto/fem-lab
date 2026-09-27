@@ -54,7 +54,11 @@ tesztek is ellenőrzik.
 
 Az **Alakzat** gomb a deformált alakzatot rajzolja, automatikus nagyítással
 (ezt az üzenetsor kiírja) — a valós lehajlás mm-es, a képernyőn láthatóvá kell
-nagyítani.
+nagyítani. Az **N/V/M diagram** gombok a rúd tengelyére merőlegesen rajzolják a
+belső erőket; a skálázás típusonként globális, és az értékek a rúd MENTÉN
+keresett maximumokból jönnek, nem csak a csomópontokból. Megoszló teher esetén a
+nyomatékdiagram kvadratikus, ezért egyetlen hosszú elemen a valódi maximum a
+középen van — ezt a számsítás már figyelembe veszi.
 
 **Pontosság:** egyetlen rúdelem a megoszló teher okozta lehajlás közepén csak ~80%-ot
 ad (a pontos alak kvartikus, az elem kubikus). Ha a lehajlás számít, oszd fel a

@@ -172,6 +172,33 @@ button.active {
   font-weight: 600;
 }
 
+button.small {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+#diagram-toggles {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#diagram-toggles button {
+  flex: 1;
+}
+
+button.diag-n {
+  border-color: #2f6b4c;
+}
+
+button.diag-v {
+  border-color: #6b5c2f;
+}
+
+button.diag-m {
+  border-color: #6b4630;
+}
+
 button.danger {
   width: 100%;
   margin-top: 8px;

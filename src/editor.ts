@@ -73,6 +73,9 @@ export class Editor {
   /** A legutóbbi száítás eredménye; a modell módosításakor érvénytelenítjük. */
   result: SolveResult | null = null;
   showDeform = false;
+  showDiagN = false;
+  showDiagV = false;
+  showDiagM = false;
   loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
   hoverNode = -1;
   hoverBeam = -1;
@@ -126,6 +129,9 @@ export class Editor {
       selfWeight: this.structure.selfWeight,
       result: this.result,
       showDeform: this.showDeform,
+      showDiagN: this.showDiagN,
+      showDiagV: this.showDiagV,
+      showDiagM: this.showDiagM,
     };
   }
 

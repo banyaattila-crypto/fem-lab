@@ -4,7 +4,7 @@ import { materialById, sectionById } from './catalog';
 import { screenToWorld, worldToScreen } from './camera';
 import type { Camera, Viewport } from './camera';
 import type { SolveResult } from './solver';
-import { deformedNode, deformedPointAt } from './solver';
+import { deformedNode, deformedPointAt, internalAt } from './solver';
 import type { Point } from './geometry';
 
 export type Tool = 'select' | 'node' | 'beam' | 'support' | 'force' | 'moment' | 'dist';
@@ -32,6 +32,9 @@ export interface SceneState {
   selfWeight: boolean;
   result: SolveResult | null;
   showDeform: boolean;
+  showDiagN: boolean;
+  showDiagV: boolean;
+  showDiagM: boolean;
   loadValue: { fx: number; fy: number; mz: number; qy: number };
 }
 
@@ -52,6 +55,9 @@ export const COLORS = {
   beamHover: '#a8c8ff',
   node: '#e6edf7',
   deformed: '#ff7ad9',
+  diagN: '#6ee7a8',
+  diagV: '#ffd166',
+  diagM: '#ff8a5c',
   nodeSelected: '#ffd166',
   nodeHover: '#ffffff',
   preview: '#9ad5a0',
@@ -202,6 +208,74 @@ export function drawStructure(ctx: CanvasRenderingContext2D, st: SceneState): vo
  * automatikusan nagyít: a legnagyobb elmozdulás ~120 px lesz a képernyőn.
  * Visszaadja a nagyítási tényezőt, hogy a felhasználó tudja, mit lát.
  */
+/**
+ * Az N, V és M diagramok a rúd tengelyére merőlegesen, a helyi y' irányába
+ * rajzolódnak. A skálázás típusonként globális, hogy a legnagyobb érték
+ * minden diagramspecifikációban kb. 70 px legyen. Az M a pozitív, a V a negatív
+ * oldalra kerül, hogy ne fedjék egymást.
+ */
+export function drawDiagrams(ctx: CanvasRenderingContext2D, st: SceneState): void {
+  const { structure: s, camera: cam, viewport: vp, result } = st;
+  if (!result || !result.ok) return;
+  if (!st.showDiagN && !st.showDiagV && !st.showDiagM) return;
+  const px = 70;
+  const scaleOf = (max: number): number => (max > 0 ? px / (max * cam.zoom) : 0);
+  const scales = { N: scaleOf(result.maxN), V: scaleOf(result.maxV), M: scaleOf(result.maxM) };
+  const steps = 24;
+
+  ctx.save();
+  for (const bm of s.beams) {
+    const a = nodeById(s, bm.nodeI);
+    const b = nodeById(s, bm.nodeJ);
+    if (!a || !b) continue;
+    const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    // a helyi y' tengely a rúd irányára merőleges
+    const ny = { x: -(b.y - a.y) / L, y: (b.x - a.x) / L };
+    for (const kind of ['M', 'V', 'N'] as const) {
+      const on = kind === 'M' ? st.showDiagM : kind === 'V' ? st.showDiagV : st.showDiagN;
+      const scale = scales[kind];
+      if (!on || scale === 0) continue;
+      // a V diagram az ellenkező oldalra rajzolódik
+      const side = kind === 'V' ? -1 : 1;
+      const base: Point[] = [];
+      const curve: Point[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const xi = i / steps;
+        const w = { x: a.x + xi * (b.x - a.x), y: a.y + xi * (b.y - a.y) };
+        const f = internalAt(s, result, bm.id, xi);
+        const d = (kind === 'N' ? f.N : kind === 'V' ? f.V : f.M) * scale * side;
+        base.push(w);
+        curve.push({ x: w.x + ny.x * d, y: w.y + ny.y * d });
+      }
+      ctx.beginPath();
+      base.forEach((p, i) => {
+        const sp = worldToScreen(cam, vp, p);
+        if (i === 0) ctx.moveTo(sp.x, sp.y);
+        else ctx.lineTo(sp.x, sp.y);
+      });
+      for (let i = curve.length - 1; i >= 0; i--) {
+        const sp = worldToScreen(cam, vp, curve[i]!);
+        ctx.lineTo(sp.x, sp.y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = COLORS[`diag${kind}`];
+      ctx.globalAlpha = 0.18;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = COLORS[`diag${kind}`];
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      curve.forEach((p, i) => {
+        const sp = worldToScreen(cam, vp, p);
+        if (i === 0) ctx.moveTo(sp.x, sp.y);
+        else ctx.lineTo(sp.x, sp.y);
+      });
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 export function drawDeformed(ctx: CanvasRenderingContext2D, st: SceneState): number {
   const { structure: s, camera: cam, viewport: vp, result } = st;
   if (!result || !result.ok || result.maxAbsU <= 0) return 1;
@@ -303,6 +377,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: SceneState): void {
   ctx.fillRect(0, 0, st.viewport.width, st.viewport.height);
   drawGrid(ctx, st);
   drawStructure(ctx, st);
+  drawDiagrams(ctx, st);
   if (st.showDeform && st.result) drawDeformed(ctx, st);
   drawDistLoads(ctx, st);
   drawSupports(ctx, st);
