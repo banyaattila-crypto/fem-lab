@@ -1,3 +1,6 @@
+import { cloneCatalog, defaultCatalog, materialById, sectionById, sectionProps } from './catalog';
+import type { Catalog, Material, Section } from './catalog';
+
 export interface Point {
   x: number;
   y: number;
@@ -11,6 +14,8 @@ export interface Beam {
   id: number;
   nodeI: number;
   nodeJ: number;
+  materialId: string;
+  sectionId: string;
 }
 
 export type SupportType = 'pinned' | 'roller' | 'fixed';
@@ -42,10 +47,30 @@ export interface Structure {
   supports: Support[];
   loads: PointLoad[];
   distLoads: DistLoad[];
+  /** Az önsúly a szolverben külön opció — tároljuk, hogy a fájl hordozza. */
+  selfWeight: boolean;
+  catalog: Catalog;
 }
 
 export function createStructure(): Structure {
-  return { nodes: [], beams: [], supports: [], loads: [], distLoads: [] };
+  return {
+    nodes: [],
+    beams: [],
+    supports: [],
+    loads: [],
+    distLoads: [],
+    selfWeight: false,
+    catalog: defaultCatalog(),
+  };
+}
+
+/** Első katalógusbejegyzés az alapértelmezett (új rúd ezt kapja). */
+export function defaultMaterialId(s: Structure): string {
+  return s.catalog.materials[0]?.id ?? '';
+}
+
+export function defaultSectionId(s: Structure): string {
+  return s.catalog.sections[1]?.id ?? s.catalog.sections[0]?.id ?? '';
 }
 
 export function addNode(s: Structure, x: number, y: number): number {
@@ -58,13 +83,68 @@ export function nodeById(s: Structure, id: number): Node | undefined {
 }
 
 /** Csak érvényes, nem önismétlő rúd jöhet létre (nulla hossz vagy duplikátum esetén null). */
-export function addBeam(s: Structure, nodeI: number, nodeJ: number): Beam | null {
+export function addBeam(
+  s: Structure,
+  nodeI: number,
+  nodeJ: number,
+  materialId?: string,
+  sectionId?: string,
+): Beam | null {
   if (nodeI === nodeJ) return null;
   if (!nodeById(s, nodeI) || !nodeById(s, nodeJ)) return null;
   if (findBeamBetween(s, nodeI, nodeJ)) return null;
-  const beam: Beam = { id: s.beams.length, nodeI, nodeJ };
+  // ismeretlen katalógus-hivatkozás esetén az alapértelmezett jön létre, hogy a
+  // `structureIsConsistent` soha ne bukjon el import miatt
+  const mat = materialId && materialById(s.catalog, materialId) ? materialId : defaultMaterialId(s);
+  const sec = sectionId && sectionById(s.catalog, sectionId) ? sectionId : defaultSectionId(s);
+  const beam: Beam = { id: s.beams.length, nodeI, nodeJ, materialId: mat, sectionId: sec };
   s.beams.push(beam);
   return beam;
+}
+
+/** Kijelölt rudak anyag/szelvény rendelése; ismeretlen id esetén nem csinál semmit. */
+export function assignBeams(
+  s: Structure,
+  beamIds: number[],
+  materialId: string,
+  sectionId: string,
+): number {
+  const mat = materialById(s.catalog, materialId);
+  const sec = sectionById(s.catalog, sectionId);
+  if (!mat || !sec) return 0;
+  let n = 0;
+  for (const id of beamIds) {
+    const bm = s.beams.find((b) => b.id === id);
+    if (!bm) continue;
+    bm.materialId = mat.id;
+    bm.sectionId = sec.id;
+    n += 1;
+  }
+  return n;
+}
+
+/** A rúd keresztmetszeti jellemzői a katalógusból (A m², I m⁴). */
+export function beamSection(s: Structure, beam: Beam): { A: number; I: number } | null {
+  const sec = sectionById(s.catalog, beam.sectionId);
+  if (!sec) return null;
+  const p = sectionProps(sec);
+  return { A: p.A, I: p.I };
+}
+
+export function beamMaterial(s: Structure, beam: Beam) {
+  return materialById(s.catalog, beam.materialId);
+}
+
+/** A teljes szerkezet tömege (kg) és súlya (kN) — a méretjegyzék alapján. */
+export function massAndWeight(s: Structure): { mass: number; weight: number } {
+  let mass = 0;
+  for (const bm of s.beams) {
+    const mat = beamMaterial(s, bm);
+    const sec = beamSection(s, bm);
+    if (!mat || !sec) continue;
+    mass += sec.A * beamLength(s, bm) * mat.rho;
+  }
+  return { mass, weight: (mass * 9.81) / 1000 };
 }
 
 export function findBeamBetween(s: Structure, a: number, b: number): Beam | undefined {
@@ -99,7 +179,7 @@ export function removeNode(s: Structure, nodeId: number): void {
   s.beams = kept.map((bm) => {
     const i = remap(bm.nodeI);
     const j = remap(bm.nodeJ);
-    return { id: 0, nodeI: Math.min(i, j), nodeJ: Math.max(i, j) };
+    return { ...bm, id: 0, nodeI: Math.min(i, j), nodeJ: Math.max(i, j) };
   });
   s.supports = s.supports
     .filter((sp) => sp.node !== nodeId)
@@ -260,6 +340,8 @@ export function structureIsConsistent(s: Structure): boolean {
   for (const bm of s.beams) {
     if (bm.nodeI === bm.nodeJ) return false;
     if (!nodeById(s, bm.nodeI) || !nodeById(s, bm.nodeJ)) return false;
+    if (!materialById(s.catalog, bm.materialId)) return false;
+    if (!sectionById(s.catalog, bm.sectionId)) return false;
   }
   for (const sp of s.supports) {
     if (!nodeById(s, sp.node)) return false;
@@ -281,33 +363,58 @@ export function cloneStructure(s: Structure): Structure {
     supports: s.supports.map((sp) => ({ ...sp })),
     loads: s.loads.map((ld) => ({ ...ld })),
     distLoads: s.distLoads.map((dl) => ({ ...dl })),
+    selfWeight: s.selfWeight,
+    catalog: cloneCatalog(s.catalog),
   };
 }
 
+export interface SerializedBeam {
+  nodeI: number;
+  nodeJ: number;
+  materialId?: string;
+  sectionId?: string;
+}
+
 export interface SerializedStructure {
-  version: 1;
+  version: 1 | 2;
   nodes: Point[];
-  beams: { nodeI: number; nodeJ: number }[];
+  beams: SerializedBeam[];
   supports?: { node: number; type: SupportType }[];
   loads?: { node: number; fx: number; fy: number; mz: number }[];
   distLoads?: { beam: number; qy: number }[];
+  selfWeight?: boolean;
+  materials?: Material[];
+  sections?: Section[];
 }
 
 export function toJSON(s: Structure): SerializedStructure {
   return {
-    version: 1,
+    version: 2,
     nodes: s.nodes.map((n) => ({ x: n.x, y: n.y })),
-    beams: s.beams.map((bm) => ({ nodeI: bm.nodeI, nodeJ: bm.nodeJ })),
+    beams: s.beams.map((bm) => ({
+      nodeI: bm.nodeI,
+      nodeJ: bm.nodeJ,
+      materialId: bm.materialId,
+      sectionId: bm.sectionId,
+    })),
     supports: s.supports.map((sp) => ({ node: sp.node, type: sp.type })),
     loads: s.loads.map((ld) => ({ node: ld.node, fx: ld.fx, fy: ld.fy, mz: ld.mz })),
     distLoads: s.distLoads.map((dl) => ({ beam: dl.beam, qy: dl.qy })),
+    selfWeight: s.selfWeight,
+    materials: s.catalog.materials.map((m) => ({ ...m })),
+    sections: s.catalog.sections.map((sec) => ({ ...sec })),
   };
 }
 
 export function fromJSON(data: SerializedStructure): Structure {
   const s = createStructure();
+  // 1. verziójú fájloknál a beépített alapkatalógus és az alapértelmezett
+  // anyag/szelvény kell, a hiányzó mezőket ez pótolja
+  if (data.materials?.length) s.catalog.materials = data.materials.map((m) => ({ ...m }));
+  if (data.sections?.length) s.catalog.sections = data.sections.map((sec) => ({ ...sec }));
+  s.selfWeight = data.selfWeight ?? false;
   for (const p of data.nodes) addNode(s, p.x, p.y);
-  for (const bm of data.beams) addBeam(s, bm.nodeI, bm.nodeJ);
+  for (const bm of data.beams) addBeam(s, bm.nodeI, bm.nodeJ, bm.materialId, bm.sectionId);
   for (const sp of data.supports ?? []) setSupport(s, sp.node, sp.type);
   for (const ld of data.loads ?? []) addPointLoad(s, ld.node, ld.fx, ld.fy, ld.mz);
   for (const dl of data.distLoads ?? []) addDistLoad(s, dl.beam, dl.qy);

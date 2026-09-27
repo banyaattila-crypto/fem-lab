@@ -1,5 +1,6 @@
-import { nodeById } from './geometry';
-import type { Structure, SupportType } from './geometry';
+import { beamSection, nodeById } from './geometry';
+import type { Beam, Structure, SupportType } from './geometry';
+import { materialById, sectionById } from './catalog';
 import { screenToWorld, worldToScreen } from './camera';
 import type { Camera, Viewport } from './camera';
 import type { Point } from './geometry';
@@ -24,6 +25,9 @@ export interface SceneState {
   gridStep: number;
   snap: boolean;
   supportType: SupportType;
+  materialId: string;
+  sectionId: string;
+  selfWeight: boolean;
   loadValue: { fx: number; fy: number; mz: number; qy: number };
 }
 
@@ -110,6 +114,41 @@ export function drawGrid(ctx: CanvasRenderingContext2D, st: SceneState): void {
   ctx.stroke();
 }
 
+/**
+ * A vonalvastagság a keresztmetszet területét követi, hogy a rajzon látszódjon,
+ * melyik rúd nagyobb (√A skálázás, 2–11 px közé szorítva).
+ */
+function beamLineWidth(s: Structure, bm: Beam, selected: boolean): number {
+  const props = beamSection(s, bm);
+  if (!props) return selected ? 7 : 5;
+  const w = Math.sqrt(props.A) * 2.6;
+  const base = Math.max(2, Math.min(11, w));
+  return selected ? base + 2 : base;
+}
+
+function drawBeamLabel(
+  ctx: CanvasRenderingContext2D,
+  st: SceneState,
+  bm: Beam,
+  at: Point,
+): void {
+  const sec = sectionById(st.structure.catalog, bm.sectionId);
+  const mat = materialById(st.structure.catalog, bm.materialId);
+  if (!sec || !mat) return;
+  const text = `${sec.name} · ${mat.name}`;
+  ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+  const w = ctx.measureText(text).width;
+  const x = at.x + 10;
+  const y = at.y - 10;
+  ctx.fillStyle = 'rgba(14,17,23,0.88)';
+  ctx.fillRect(x, y - 11, w + 10, 16);
+  ctx.strokeStyle = COLORS.beamSelected;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y - 10.5, w + 9, 15);
+  ctx.fillStyle = COLORS.beamSelected;
+  ctx.fillText(text, x + 5, y);
+}
+
 export function drawStructure(ctx: CanvasRenderingContext2D, st: SceneState): void {
   const { structure: s, camera: cam, viewport: vp } = st;
   const selN = new Set(st.selectedNodes);
@@ -128,11 +167,12 @@ export function drawStructure(ctx: CanvasRenderingContext2D, st: SceneState): vo
       : st.hoverBeam === bm.id
         ? COLORS.beamHover
         : COLORS.beam;
-    ctx.lineWidth = selected ? 7 : 5;
+    ctx.lineWidth = beamLineWidth(s, bm, selected);
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
+    if (selected) drawBeamLabel(ctx, st, bm, pb);
   }
 
   for (const n of s.nodes) {

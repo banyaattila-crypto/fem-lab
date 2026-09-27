@@ -76,6 +76,12 @@ describe('app wiring', () => {
       'snap-toggle',
       'load-fx',
       'load-fy',
+      'stat-mass',
+      'stat-weight',
+      'material-select',
+      'section-select',
+      'self-weight',
+      'section-hint',
       'load-mz',
       'load-qy',
     ];
@@ -107,6 +113,32 @@ describe('app wiring', () => {
     selectBtn?.click();
     expect(selectBtn?.classList.contains('active')).toBe(true);
     expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Kijelölés');
+  });
+
+  it('a katalógus legördülők feltöltődnek, és a választás a rudakra kerül', async () => {
+    await import('../src/main');
+    const mat = document.querySelector<HTMLSelectElement>('#material-select');
+    const sec = document.querySelector<HTMLSelectElement>('#section-select');
+    expect(mat?.options.length).toBe(4);
+    expect(sec?.options.length).toBe(6);
+    expect(mat?.value).toBe('s235');
+    expect(sec?.value).toBe('sq150');
+    if (mat) {
+      mat.value = 's355';
+      mat.dispatchEvent(new Event('change'));
+    }
+    expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Szelvény');
+  });
+
+  it('az önsúly-kapcsoló átbillen és a súlystatisztika megjelenik', async () => {
+    await import('../src/main');
+    const box = document.querySelector<HTMLInputElement>('#self-weight');
+    expect(box?.checked).toBe(false);
+    box?.click();
+    expect(box?.checked).toBe(true);
+    expect(document.querySelector<HTMLElement>('#message')?.textContent).toContain('Önsúly');
+    expect(document.querySelector<HTMLElement>('#stat-weight')?.textContent).toBe('0.00 kN');
+    expect(document.querySelector<HTMLElement>('#stat-mass')?.textContent).toBe('0 kg');
   });
 
   it('a támasztípus-választó kijelöli az aktív típust', async () => {

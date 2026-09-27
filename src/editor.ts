@@ -23,6 +23,7 @@ import {
   fromJSON,
 } from './geometry';
 import type { Beam, Point, Structure, SupportType } from './geometry';
+import { assignBeams, defaultMaterialId, defaultSectionId, massAndWeight } from './geometry';
 import { canRedo, canUndo, commit, createHistory, redo, undo } from './history';
 import type { HistoryState } from './history';
 import type { SceneState, Tool } from './render';
@@ -66,6 +67,8 @@ export class Editor {
   selectedLoads: number[] = [];
   selectedDist: number[] = [];
   supportType: SupportType = 'pinned';
+  materialId = '';
+  sectionId = '';
   loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
   hoverNode = -1;
   hoverBeam = -1;
@@ -82,6 +85,8 @@ export class Editor {
 
   constructor(opts: EditorOptions = {}) {
     this.gridStep = opts.gridStep ?? 0.25;
+    this.materialId = defaultMaterialId(this.structure);
+    this.sectionId = defaultSectionId(this.structure);
   }
 
   onChange(fn: ChangeListener): void {
@@ -112,12 +117,55 @@ export class Editor {
       snap: this.snap,
       supportType: this.supportType,
       loadValue: this.loadValue,
+      materialId: this.materialId,
+      sectionId: this.sectionId,
+      selfWeight: this.structure.selfWeight,
     };
+  }
+
+  /**
+   * Az aktuális anyag/szelvény választást érvényben tartja a katalóguson. Ha a
+   * modell tartalmaz rudat, a panel a betöltött modell első rúdját követi, hogy
+   * a legördülők ne mutassanak mást, mint amit a vászonon lát a felhasználó.
+   */
+  private syncCatalogSelection(): void {
+    const c = this.structure.catalog;
+    const first = this.structure.beams[0];
+    const matId = first?.materialId ?? this.materialId;
+    const secId = first?.sectionId ?? this.sectionId;
+    this.materialId = c.materials.some((m) => m.id === matId) ? matId : defaultMaterialId(this.structure);
+    this.sectionId = c.sections.some((sec) => sec.id === secId) ? secId : defaultSectionId(this.structure);
   }
 
   setSupportType(t: SupportType): void {
     this.supportType = t;
     this.emit();
+  }
+
+  /**
+   * Anyag/szelvény választás. Ha van kijelölt rúd, azokra alkalmazza; ha nincs,
+   * csak az új rudak alapértékét állítja be.
+   */
+  setSection(materialId: string, sectionId: string): number {
+    const targets = this.selectedBeams;
+    let applied = 0;
+    if (targets.length > 0) {
+      commit(this.history, this.structure);
+      applied = assignBeams(this.structure, targets, materialId, sectionId);
+    }
+    if (materialId) this.materialId = materialId;
+    if (sectionId) this.sectionId = sectionId;
+    this.emit();
+    return applied;
+  }
+
+  setSelfWeight(on: boolean): void {
+    this.structure.selfWeight = on;
+    this.emit();
+  }
+
+  totalMassAndWeight(): { mass: number; weight: number } {
+    return massAndWeight(this.structure);
   }
 
   setLoadValue(v: Partial<LoadValues>): void {
@@ -184,7 +232,7 @@ export class Editor {
       }
       if (from !== to && !this.hasBeam(from, to)) {
         if (near) commit(this.history, this.structure);
-        addBeam(this.structure, from, to);
+        addBeam(this.structure, from, to, this.materialId, this.sectionId);
       }
       this.previewFrom = to;
       this.emit();
@@ -435,6 +483,8 @@ export class Editor {
     if (this.structure.nodes.length === 0) return;
     commit(this.history, this.structure);
     this.structure = createStructure();
+    this.materialId = defaultMaterialId(this.structure);
+    this.sectionId = defaultSectionId(this.structure);
     this.selectedNodes = [];
     this.selectedBeams = [];
     this.clearItemSelection();
@@ -516,6 +566,7 @@ export class Editor {
       if (!structureIsConsistent(s)) return false;
       commit(this.history, this.structure);
       this.structure = s;
+      this.syncCatalogSelection();
       this.pruneSelection();
       this.emit();
       return true;
@@ -535,7 +586,7 @@ export class Editor {
       if (!a || !b) continue;
       const na = addNode(this.structure, a.x, a.y + this.gridStep * 2);
       const nb = addNode(this.structure, b.x, b.y + this.gridStep * 2);
-      addBeam(this.structure, na, nb);
+      addBeam(this.structure, na, nb, this.materialId, this.sectionId);
     }
     this.emit();
   }

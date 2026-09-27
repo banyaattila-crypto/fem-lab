@@ -23,6 +23,12 @@ const statBeams = el<HTMLElement>('#stat-beams');
 const statSupports = el<HTMLElement>('#stat-supports');
 const statLoads = el<HTMLElement>('#stat-loads');
 const statLength = el<HTMLElement>('#stat-length');
+const statMass = el<HTMLElement>('#stat-mass');
+const statWeight = el<HTMLElement>('#stat-weight');
+const materialSelect = el<HTMLSelectElement>('#material-select');
+const sectionSelect = el<HTMLSelectElement>('#section-select');
+const selfWeightBox = el<HTMLInputElement>('#self-weight');
+const sectionHint = el<HTMLElement>('#section-hint');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const supportButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-support]'));
 const loadFx = el<HTMLInputElement>('#load-fx');
@@ -70,6 +76,9 @@ function refresh(): void {
   statSupports.textContent = String(editor.structure.supports.length);
   statLoads.textContent = String(editor.structure.loads.length + editor.structure.distLoads.length);
   statLength.textContent = `${editor.totalLength().toFixed(2)} m`;
+  const { mass, weight } = editor.totalMassAndWeight();
+  statMass.textContent = mass >= 1000 ? `${(mass / 1000).toFixed(2)} t` : `${mass.toFixed(0)} kg`;
+  statWeight.textContent = `${weight.toFixed(2)} kN`;
   btnUndo.disabled = !editor.undoAvailable();
   btnRedo.disabled = !editor.redoAvailable();
   const hasSel =
@@ -287,3 +296,60 @@ window.addEventListener('resize', resize);
 resize();
 setTool('beam');
 pushLoadValues();
+
+function fillCatalogSelects(): void {
+  const c = editor.structure.catalog;
+  materialSelect.innerHTML = '';
+  for (const m of c.materials) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name;
+    materialSelect.append(opt);
+  }
+  sectionSelect.innerHTML = '';
+  for (const sec of c.sections) {
+    const opt = document.createElement('option');
+    opt.value = sec.id;
+    opt.textContent = sec.name;
+    sectionSelect.append(opt);
+  }
+  materialSelect.value = editor.materialId;
+  sectionSelect.value = editor.sectionId;
+}
+
+function pushSection(): void {
+  const applied = editor.setSection(materialSelect.value, sectionSelect.value);
+  if (applied > 0) {
+    setMessage(`Szelvény beállítva ${applied} rudon.`);
+  } else {
+    setMessage('Szelvény beállítva — ez lesz az új rudak alapértéke.');
+  }
+  draw();
+}
+
+materialSelect.addEventListener('change', pushSection);
+sectionSelect.addEventListener('change', pushSection);
+selfWeightBox.addEventListener('change', () => {
+  editor.setSelfWeight(selfWeightBox.checked);
+  setMessage(
+    selfWeightBox.checked
+      ? 'Önsúly beleszámít a teherbe.'
+      : 'Önsúly kikapcsolva.',
+  );
+  draw();
+});
+
+function syncSectionPanel(): void {
+  materialSelect.value = editor.materialId;
+  sectionSelect.value = editor.sectionId;
+  selfWeightBox.checked = editor.structure.selfWeight;
+  const n = editor.selectedBeams.length;
+  sectionHint.textContent =
+    n > 0
+      ? `Kijelölt rúd: ${n} db — a választás rájuk is rákerül.`
+      : 'Nincs kijelölt rúd — a választás az új rudak alapértéke lesz.';
+}
+
+fillCatalogSelects();
+syncSectionPanel();
+editor.onChange(syncSectionPanel);

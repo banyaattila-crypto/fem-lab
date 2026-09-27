@@ -465,3 +465,109 @@ describe('szerkesztő — terhek', () => {
     expect(e2.structure.distLoads[0]!.qy).toBe(-5000);
   });
 });
+
+describe('szerkesztő — anyag és szelvény', () => {
+  function beam(): Editor {
+    const e = makeEditor();
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+    return e;
+  }
+
+  it('az új rúd a szerkesztő aktuális alapértékét kapja', () => {
+    const e = makeEditor();
+    e.setSection('c25', 'sq200');
+    drawBeam(e, [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+    expect(e.structure.beams[0]!.materialId).toBe('c25');
+    expect(e.structure.beams[0]!.sectionId).toBe('sq200');
+    expect(e.structure.beams[0]!.id).toBe(0);
+  });
+
+  it('kijelölt rúdra a választás rákerül, és visszavonható', () => {
+    const e = beam();
+    const before = e.structure.beams[0]!.sectionId;
+    e.setTool('select');
+    e.pointerDown({ x: 2, y: 0 });
+    expect(e.selectedBeams).toEqual([0]);
+    const applied = e.setSection('s355', 'ipe160');
+    expect(applied).toBe(1);
+    expect(e.structure.beams[0]!.sectionId).toBe('ipe160');
+    expect(e.structure.beams[0]!.materialId).toBe('s355');
+    e.doUndo();
+    expect(e.structure.beams[0]!.sectionId).toBe(before);
+  });
+
+  it('kijelölés nélkül csak az alapérték változik, a meglévő rúd érintetlen', () => {
+    const e = beam();
+    const before = e.structure.beams[0]!.sectionId;
+    expect(e.setSection('gl24', 'd60')).toBe(0);
+    expect(e.structure.beams[0]!.sectionId).toBe(before);
+    expect(e.materialId).toBe('gl24');
+    expect(e.sectionId).toBe('d60');
+  });
+
+  it('az önsúly-kapcsoló a modellben tárolódik és a tömeg/súly számítása érinti', () => {
+    const e = beam();
+    e.setSection('s235', 'sq150');
+    const before = e.totalMassAndWeight();
+    expect(before.mass).toBeGreaterThan(0);
+    e.setSelfWeight(true);
+    expect(e.structure.selfWeight).toBe(true);
+    e.setSelfWeight(false);
+    expect(e.structure.selfWeight).toBe(false);
+  });
+
+  it('a tömeg a kijelölt rúd szelvényváltásával változik', () => {
+    const e = beam();
+    e.setTool('select');
+    e.pointerDown({ x: 2, y: 0 });
+    e.setSection('s235', 'sq100');
+    const small = e.totalMassAndWeight().mass;
+    e.setSection('s235', 'sq200');
+    const big = e.totalMassAndWeight().mass;
+    expect(small).toBeGreaterThan(0);
+    expect(big / small).toBeCloseTo(4, 6);
+  });
+
+  it('a törlés után visszamaradó kijelölésből a katalógus nem csúszik el', () => {
+    const e = beam();
+    e.setTool('select');
+    e.pointerDown({ x: 2, y: 0 });
+    e.deleteSelection();
+    expect(e.selectedBeams).toEqual([]);
+    expect(structureIsConsistent(e.structure)).toBe(true);
+  });
+
+  it('az import után a kijelölés a betöltött katalógushoz igazodik', () => {
+    const e = makeEditor();
+    const donor = beam();
+    donor.setTool('select');
+    donor.pointerDown({ x: 2, y: 0 });
+    donor.setSection('gl24', 'd60');
+    const json = donor.exportJSON();
+    expect(e.importJSON(json)).toBe(true);
+    expect(e.structure.beams[0]!.sectionId).toBe('d60');
+    expect(e.sectionId).toBe(e.structure.beams[0]!.sectionId);
+    expect(structureIsConsistent(e.structure)).toBe(true);
+  });
+
+  it('a teljes modell mentés-visszatöltés után a katalógust is megőrzi', () => {
+    const e = beam();
+    e.setTool('select');
+    e.pointerDown({ x: 2, y: 0 });
+    e.setSection('s355', 'heb200');
+    e.setSelfWeight(true);
+    const json = e.exportJSON();
+    const back = makeEditor();
+    expect(back.importJSON(json)).toBe(true);
+    expect(back.structure.beams[0]!.materialId).toBe('s355');
+    expect(back.structure.beams[0]!.sectionId).toBe('heb200');
+    expect(back.structure.selfWeight).toBe(true);
+    expect(back.totalMassAndWeight().mass).toBeCloseTo(e.totalMassAndWeight().mass, 6);
+  });
+});

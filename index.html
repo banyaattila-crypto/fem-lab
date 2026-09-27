@@ -19,6 +19,28 @@
         </header>
 
         <section class="panel">
+          <h2>Anyag és szelvény</h2>
+          <div class="load-inputs">
+            <label class="row">
+              <span>Anyag</span>
+              <select id="material-select"></select>
+            </label>
+            <label class="row">
+              <span>Szelvény</span>
+              <select id="section-select"></select>
+            </label>
+          </div>
+          <label class="row checkbox">
+            <input id="self-weight" type="checkbox" />
+            <span>Önsúly számítása (A·ρ·g)</span>
+          </label>
+          <p class="hint" id="section-hint">
+            Kijelölt rúd nélkül az új rudak alapértéke; kijelölt rudaknál a
+            választás rájuk is rákerül.
+          </p>
+        </section>
+
+        <section class="panel">
           <h2>Eszköz</h2>
           <div class="tools">
             <button type="button" data-tool="beam" class="active" aria-pressed="true">
@@ -116,6 +138,8 @@
             <div><dt>Támasz</dt><dd id="stat-supports">0</dd></div>
             <div><dt>Teher</dt><dd id="stat-loads">0</dd></div>
             <div><dt>Teljes hossz</dt><dd id="stat-length">0.00 m</dd></div>
+            <div><dt>Tömeg</dt><dd id="stat-mass">0 kg</dd></div>
+            <div><dt>Súly</dt><dd id="stat-weight">0.00 kN</dd></div>
           </dl>
           <div class="tools two">
             <button type="button" id="btn-export">Export</button>

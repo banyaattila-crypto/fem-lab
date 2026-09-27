@@ -6,7 +6,7 @@ Az alkalmazás első lépése a rajzolás: a felhasználó a vászonra felrajzol
 csomópontokból és rudakból. Ez a rajz a későbbi FEM-számítás geometriai bemenete —
 a modellezés nem előre gyárilag sávolt sablonokból indul, hanem abból, amit rajzolsz.
 
-## Most (2. iteráció): a rajzoló + támaszok/terhek
+## Most (3. iteráció): a rajzoló + támaszok/terhek + anyag/szelvény
 
 - **Rúd eszköz** — kattints a kezdőpontra, majd a végpontokra; a lánc folytatódik
   (Esc vagy dupla kattintás zárja). A meglévő csomópontra kattintva az ahhoz csatlakozik,
@@ -28,9 +28,22 @@ a modellezés nem előre gyárilag sávolt sablonokból indul, hanem abból, ami
 Az értékbevitel kN / kN·m / kN/m egységben történik, a modell SI-ben (N, N·m,
 N/m) tárol — így a szolverhez nem kell konverzió.
 
+### Anyag- és szelvénykatalógus
+
+- **4 anyag** (S235JR, S355, C25/30 beton, GL24h fa) E, ν, ρ és karakterisztikus
+  folyáshatár fy értékkel.
+- **6 szelvény** (3 téglalap, 1 kör, IPE 160, HEB 200) — a téglalap, kör és I
+  szelvény másodlagos momentuma képlettel számolódik, a tárolt szelvényeknél a
+  méretezési táblázatoknak megfelelő nagyságrend.
+- A kiválasztás **kijelölt rudak** esetén rájuk kerül, egyébként az új rudak
+  alapértéke lesz. A rúd vonalvastagsága a keresztmetszet területét követi.
+- Élő **tömeg és súly** statisztika (A·ρ·L, illetve ·g), plusz **önsúly**
+  kapcsoló a szolverhez.
+
 ### Adatmodell
 
-A `Structure { nodes, beams, supports, loads, distLoads }` a FEM bemenete. Az
+A `Structure { nodes, beams, supports, loads, distLoads, selfWeight, catalog }`
+a FEM bemenete. Az
 `id === index` invariáns minden művelet után is áll — beleértve a csomópont- és
 rúdtörlést, ami a terhek hivatkozásait is újraszámolja (`structureIsConsistent`
 ellenőrzi, tesztelve van).
