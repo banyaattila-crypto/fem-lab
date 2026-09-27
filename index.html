@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="hu">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>fem-lab — 2D vázrajzoló</title>
+    <meta
+      name="description"
+      content="Rajzolj meg egy 2D szerkezetet csomópontokból és rudakból — erre épül majd a végeselem-számítás."
+    />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <h1>fem-lab</h1>
+          <p>2D vázrajzoló — a FEM alapja</p>
+        </header>
+
+        <section class="panel">
+          <h2>Eszköz</h2>
+          <div class="tools">
+            <button type="button" data-tool="beam" class="active" aria-pressed="true">
+              Rúd <kbd>B</kbd>
+            </button>
+            <button type="button" data-tool="node" aria-pressed="false">
+              Csomópont <kbd>N</kbd>
+            </button>
+            <button type="button" data-tool="select" aria-pressed="false">
+              Kijelölés <kbd>V</kbd>
+            </button>
+          </div>
+          <p id="message" class="hint">Rúd: kattints a kezdőpontra, majd a végpontokra.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Rács</h2>
+          <label class="row">
+            <span>Rácslépés (m)</span>
+            <input id="grid-step" type="number" min="0.01" step="0.05" value="0.25" />
+          </label>
+          <label class="row">
+            <span>Rácsra ugrás</span>
+            <input id="snap-toggle" type="checkbox" checked />
+          </label>
+        </section>
+
+        <section class="panel">
+          <h2>Szerkesztés</h2>
+          <div class="tools two">
+            <button type="button" id="btn-undo" disabled>Undo <kbd>⌘Z</kbd></button>
+            <button type="button" id="btn-redo" disabled>Redo <kbd>⇧⌘Z</kbd></button>
+            <button type="button" id="btn-delete" disabled>Törlés <kbd>Del</kbd></button>
+            <button type="button" id="btn-fit">Látómező <kbd>F</kbd></button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Modell</h2>
+          <dl class="stats">
+            <div><dt>Csomópont</dt><dd id="stat-nodes">0</dd></div>
+            <div><dt>Rúd</dt><dd id="stat-beams">0</dd></div>
+            <div><dt>Teljes hossz</dt><dd id="stat-length">0.00 m</dd></div>
+          </dl>
+          <div class="tools two">
+            <button type="button" id="btn-export">Export</button>
+            <button type="button" id="btn-import">Import</button>
+          </div>
+          <button type="button" id="btn-clear" class="danger">Rajz törlése</button>
+          <input id="file-input" type="file" accept="application/json" hidden />
+        </section>
+
+        <footer class="legend">
+          <p>Bal egér gomb: rajz/kijelölés · Jobb gomb vagy Alt: képezés · görgő: nagyítás</p>
+        </footer>
+      </aside>
+
+      <main class="board-wrap">
+        <canvas id="board"></canvas>
+        <div class="hud"><span id="coord">x = 0.00 m   y = 0.00 m</span></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
