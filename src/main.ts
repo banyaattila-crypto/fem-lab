@@ -2,7 +2,7 @@ import './style.css';
 import { screenToWorld } from './camera';
 import { Editor } from './editor';
 import { drawScene } from './render';
-import { solve } from './solver';
+import { SLS, solve, ULS } from './solver';
 import type { Tool } from './render';
 import type { SupportType } from './geometry';
 
@@ -44,6 +44,9 @@ const resBalance = el<HTMLElement>('#res-balance');
 const reactionBody = el<HTMLTableSectionElement>('#reaction-body');
 const elementBody = el<HTMLTableSectionElement>('#element-body');
 const resUtil = el<HTMLElement>('#res-util');
+const resBuckling = el<HTMLElement>('#res-buckling');
+const loadGroupSelect = el<HTMLSelectElement>('#load-group');
+const comboSelect = el<HTMLSelectElement>('#combo-select');
 const diagButtons = {
   n: el<HTMLButtonElement>('#btn-diag-n'),
   v: el<HTMLButtonElement>('#btn-diag-v'),
@@ -172,6 +175,10 @@ function pushLoadValues(): void {
     qy: (Number(loadQy.value) || 0) * 1000,
   });
 }
+
+loadGroupSelect.addEventListener('change', () => {
+  editor.setLoadGroup(loadGroupSelect.value === 'live' ? 'live' : 'dead');
+});
 
 for (const input of [loadFx, loadFy, loadMz, loadQy]) {
   input.addEventListener('input', () => {
@@ -397,7 +404,8 @@ const SUPPORT_LABEL: Record<SupportType, string> = {
 };
 
 function runSolve(): void {
-  const r = solve(editor.structure);
+  const combo = comboSelect.value === 'uls' ? ULS : SLS;
+  const r = solve(editor.structure, combo);
   editor.result = r;
   if (!r.ok) {
     resultsBox.hidden = true;
@@ -420,6 +428,9 @@ function runSolve(): void {
   const utilPct = r.maxUtilization * 100;
   resUtil.textContent = `${utilPct.toFixed(1)} % (rúd #${r.utilizationBeam + 1})`;
   resUtil.classList.toggle('over', r.maxUtilization > 1);
+  resBuckling.textContent =
+    r.bucklingBeam < 0 ? 'nincs nyomott rúd' : `${r.maxBuckling.toFixed(2)} (rúd #${r.bucklingBeam + 1})`;
+  resBuckling.classList.toggle('over', r.maxBuckling > 1);
 
   elementBody.innerHTML = '';
   for (const e of r.elements) {
@@ -434,6 +445,7 @@ function runSolve(): void {
       MPa(e.extremes.sigma),
       `${(e.extremes.def * 1000).toFixed(2)} mm`,
       `${(e.utilization * 100).toFixed(1)} %`,
+      e.buckling ? `${e.buckling.ratio.toFixed(2)}` : '—',
     ]) {
       const td = document.createElement('td');
       td.textContent = text;
@@ -461,7 +473,12 @@ function runSolve(): void {
   resultsBox.hidden = false;
   btnDeform.disabled = false;
   for (const b of Object.values(diagButtons)) b.disabled = false;
-  if (r.maxUtilization > 1) {
+  if (r.maxBuckling > 1) {
+    setMessage(
+      `Kihajlás veszélyes: |N|/N_cr = ${r.maxBuckling.toFixed(2)} (rúd #${r.bucklingBeam + 1}) — ` +
+        `a rúd a kihajlási kritikus terhelés fölött van.`,
+    );
+  } else if (r.maxUtilization > 1) {
     setMessage(
       `Kihasználtság ${(r.maxUtilization * 100).toFixed(1)} %: a folyáshatár TÚLLEPED — ` +
         `rúd #${r.utilizationBeam + 1} nem bírja el a terhet.`,
@@ -472,7 +489,9 @@ function runSolve(): void {
         `már nem nagyon van tartalék.`,
     );
   } else {
-    setMessage('Számsítás kész. Az „Alakzat” és a diagram gombok mutatják az eredményt.');
+      setMessage(
+      `Számsítás kész (${r.combo.name}). Az „Alakzat” és a diagram gombok mutatják az eredményt.`,
+    );
   }
   draw();
 }

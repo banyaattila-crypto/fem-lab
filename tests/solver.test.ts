@@ -9,10 +9,22 @@ import {
   createStructure,
   setSupport,
   structureIsConsistent,
+  toJSON,
 } from '../src/geometry';
 import type { Structure } from '../src/geometry';
 import { sectionProps } from '../src/catalog';
-import { deformedNode, deformedPointAt, dof, extremes, internalAt, localTransverseAt, momentAt, solve } from '../src/solver';
+import {
+  deformedNode,
+  deformedPointAt,
+  dof,
+  extremes,
+  internalAt,
+  localTransverseAt,
+  momentAt,
+  SLS,
+  solve,
+  ULS,
+} from '../src/solver';
 
 const E = 210e9;
 /** szelvény: 15×15 cm téglalap, S235 */
@@ -500,5 +512,108 @@ describe('szolver — feszültségkihasználtság', () => {
         expect(e.wNeeded).toBeCloseTo(props.I / yMax, 6);
       }
     }
+  });
+});
+
+describe('szolver — terheléskombinációk', () => {
+  /** Két elemes kétszer raktárosott rúd: 5 kN/m állandó + 5 kN/m változó teher. */
+  function mixed(): Structure {
+    const s = chain(2);
+    s.distLoads = [];
+    for (const bm of s.beams) {
+      addDistLoad(s, bm.id, -2500, 'dead');
+      addDistLoad(s, bm.id, -2500, 'live');
+    }
+    return s;
+  }
+
+  it('SLS-ben mindkét csoport a tényező nélkül számít', () => {
+    const r = solve(mixed(), SLS);
+    expect(r.maxM).toBeCloseTo(10000, 3);
+    expect(r.combo).toBe(SLS);
+  });
+
+  it('ULS-ben a parancsszorzók érvényesülnek', () => {
+    const r = solve(mixed(), ULS);
+    // q = 1,35*2500 + 1,50*2500 = 7125 N/m → M = q*L²/8
+    expect(r.maxM).toBeCloseTo((7125 * 16) / 8, 3);
+    // a reakciók és az elemi végi nyomatékok is a kombináció szerint kellenek
+    expect(r.reaction.fy).toBeCloseTo(28500, 6);
+    // az első elem végpontja a gerincben van, ahol a maximum van
+    expect(r.elements[0]!.M[1]).toBeCloseTo(-(7125 * 16) / 8, 3);
+  });
+
+  it('csak a változó teher eltávolítása is módosítja az eredményt', () => {
+    const s = mixed();
+    s.distLoads = s.distLoads.filter((dl) => dl.group === 'dead');
+    const r = solve(s, ULS);
+    // csak az állandó teher: q = 1,35*2500 = 3375 N/m
+    expect(r.maxM).toBeCloseTo((3375 * 16) / 8, 3);
+  });
+
+  it('az önsúly is a dead tényezővel szorzódik', () => {
+    const s = chain(2);
+    s.distLoads = [];
+    s.selfWeight = true;
+    const sls = solve(s, SLS);
+    const uls = solve(s, ULS);
+    expect(uls.maxM / sls.maxM).toBeCloseTo(1.35, 9);
+  });
+
+  it('a kombináció a szerkezetet nem módosítja', () => {
+    const s = mixed();
+    const before = JSON.stringify(toJSON(s));
+    solve(s, ULS);
+    expect(JSON.stringify(toJSON(s))).toBe(before);
+  });
+});
+
+describe('szolver — kihajlásellenőrzés', () => {
+  /** Oszlop: felül csukló, alul csukló, gyengébb kihajlásnál nagyobb N. */
+  function column(bScale: number, L = 4): Structure {
+    const s = createStructure();
+    addNode(s, 0, 0);
+    addNode(s, 0, -L);
+    addBeam(s, 0, 1);
+    assignBeams(s, [0], 's235', 'sq150');
+    // alulról befogva: különben a csúcsban a teher közvetlenül a támaszra kerül
+    // és a rúd nem kap nyomóerőt
+    setSupport(s, 1, 'fixed');
+    // a szélességet állítjuk: karcsú = nagyobb karcsúsági fok
+    const sec = s.catalog.sections.find((x) => x.id === 'sq150')!;
+    if (sec.shape === 'rect') {
+      sec.b = 0.15 * bScale;
+      sec.h = 0.15;
+    }
+    addPointLoad(s, 0, 0, -100000, 0);
+    return s;
+  }
+
+  it('karcsú oszlopnál nagyobb a kihajlási arány', () => {
+    const fat = solve(column(1));
+    const thin = solve(column(0.2));
+    expect(fat.maxBuckling).toBeGreaterThan(0);
+    expect(thin.maxBuckling).toBeGreaterThan(fat.maxBuckling);
+  });
+
+  it('a kihajlási arány a fy-nél kisebb arányt ad, mint a kihajlás', () => {
+    const r = solve(column(1));
+    // 150x150 acéloszlop, 4 m: N_cr ≈ 5,1 MN, a teher 100 kN → ~0,02
+    expect(r.maxBuckling).toBeGreaterThan(0.005);
+    expect(r.maxBuckling).toBeLessThan(0.1);
+  });
+
+  it('húzott rúdnál nincs kihajlási figyelmeztetés', () => {
+    const s = column(1);
+    s.loads[0]!.fy = 100000; // felfelé húzás
+    const r = solve(s);
+    expect(r.bucklingBeam).toBe(-1);
+    expect(r.maxBuckling).toBe(0);
+  });
+
+  it('a karcsúsági határ 200 felett jelez', () => {
+    // téglalapnál r_gy = h/√12, tehát a hossz vagy a magasság dönt
+    expect(solve(column(1, 4)).elements[0]!.buckling?.slender).toBe(true);
+    expect(solve(column(1, 0.2)).elements[0]!.buckling?.slender).toBe(false);
   });
 });

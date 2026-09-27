@@ -27,6 +27,7 @@ import { assignBeams, defaultMaterialId, defaultSectionId, massAndWeight } from 
 import { canRedo, canUndo, commit, createHistory, redo, undo } from './history';
 import type { HistoryState } from './history';
 import type { SceneState, Tool } from './render';
+import type { LoadGroup } from './geometry';
 import type { SolveResult } from './solver';
 import { worldToScreen } from './camera';
 import { PX } from './render';
@@ -77,6 +78,8 @@ export class Editor {
   showDiagV = false;
   showDiagM = false;
   loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
+  /** az újonnan rajzolt terhek csoportja (állandó vagy változó teher) */
+  loadGroup: LoadGroup = 'dead';
   hoverNode = -1;
   hoverBeam = -1;
   preview: Point | null = null;
@@ -124,6 +127,7 @@ export class Editor {
       snap: this.snap,
       supportType: this.supportType,
       loadValue: this.loadValue,
+      loadGroup: this.loadGroup,
       materialId: this.materialId,
       sectionId: this.sectionId,
       selfWeight: this.structure.selfWeight,
@@ -184,6 +188,11 @@ export class Editor {
   setLoadValue(v: Partial<LoadValues>): void {
     this.loadValue = { ...this.loadValue, ...v };
     this.emit();
+  }
+
+  /** Az új terhek terheléscsoportja — a kombinációk ezt használják. */
+  setLoadGroup(g: LoadGroup): void {
+    this.loadGroup = g;
   }
 
   /** A modell megváltozott: a korábbi eredmény már nem érvényes. */
@@ -281,7 +290,7 @@ export class Editor {
       const useMz = this.tool === 'moment' ? mz : 0;
       if (useFx === 0 && useFy === 0 && useMz === 0) return;
       this.snapshot();
-      addPointLoad(this.structure, near.id, useFx, useFy, useMz);
+      addPointLoad(this.structure, near.id, useFx, useFy, useMz, this.loadGroup);
       this.emit();
       return;
     }
@@ -290,7 +299,7 @@ export class Editor {
       const near = findBeamNear(this.structure, w, this.tol());
       if (!near || this.loadValue.qy === 0) return;
       this.snapshot();
-      addDistLoad(this.structure, near.id, this.loadValue.qy);
+      addDistLoad(this.structure, near.id, this.loadValue.qy, this.loadGroup);
       this.emit();
       return;
     }

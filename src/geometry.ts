@@ -26,12 +26,20 @@ export interface Support {
 }
 
 /** Koncentrált teher egy csomópontban: erő (N) és nyomaték (N·m). */
+/**
+ * Terheléscsoport: `dead` = állandó (önsúly, saját súly, földnyomás),
+ * `live` = változó (hasznos teher, szél, hó). A terheléskombinációk ezekre
+ * külön parancsszorzót adnak.
+ */
+export type LoadGroup = 'dead' | 'live';
+
 export interface PointLoad {
   id: number;
   node: number;
   fx: number;
   fy: number;
   mz: number;
+  group: LoadGroup;
 }
 
 /** Megoszló teher egy rúdon: q y irányú vonallinére erő (N/m), pozitív = felfelé. */
@@ -39,6 +47,7 @@ export interface DistLoad {
   id: number;
   beam: number;
   qy: number;
+  group: LoadGroup;
 }
 
 export interface Structure {
@@ -234,10 +243,11 @@ export function addPointLoad(
   fx: number,
   fy: number,
   mz: number,
+  group: LoadGroup = 'dead',
 ): PointLoad | null {
   if (!nodeById(s, nodeId)) return null;
   if (fx === 0 && fy === 0 && mz === 0) return null;
-  const load: PointLoad = { id: s.loads.length, node: nodeId, fx, fy, mz };
+  const load: PointLoad = { id: s.loads.length, node: nodeId, fx, fy, mz, group };
   s.loads.push(load);
   return load;
 }
@@ -251,10 +261,15 @@ export function removePointLoad(s: Structure, loadId: number): void {
   });
 }
 
-export function addDistLoad(s: Structure, beamId: number, qy: number): DistLoad | null {
+export function addDistLoad(
+  s: Structure,
+  beamId: number,
+  qy: number,
+  group: LoadGroup = 'dead',
+): DistLoad | null {
   if (!s.beams.some((bm) => bm.id === beamId)) return null;
   if (qy === 0) return null;
-  const dl: DistLoad = { id: s.distLoads.length, beam: beamId, qy };
+  const dl: DistLoad = { id: s.distLoads.length, beam: beamId, qy, group };
   s.distLoads.push(dl);
   return dl;
 }
@@ -380,8 +395,8 @@ export interface SerializedStructure {
   nodes: Point[];
   beams: SerializedBeam[];
   supports?: { node: number; type: SupportType }[];
-  loads?: { node: number; fx: number; fy: number; mz: number }[];
-  distLoads?: { beam: number; qy: number }[];
+  loads?: { node: number; fx: number; fy: number; mz: number; group?: LoadGroup }[];
+  distLoads?: { beam: number; qy: number; group?: LoadGroup }[];
   selfWeight?: boolean;
   materials?: Material[];
   sections?: Section[];
@@ -398,8 +413,14 @@ export function toJSON(s: Structure): SerializedStructure {
       sectionId: bm.sectionId,
     })),
     supports: s.supports.map((sp) => ({ node: sp.node, type: sp.type })),
-    loads: s.loads.map((ld) => ({ node: ld.node, fx: ld.fx, fy: ld.fy, mz: ld.mz })),
-    distLoads: s.distLoads.map((dl) => ({ beam: dl.beam, qy: dl.qy })),
+    loads: s.loads.map((ld) => ({
+      node: ld.node,
+      fx: ld.fx,
+      fy: ld.fy,
+      mz: ld.mz,
+      group: ld.group,
+    })),
+    distLoads: s.distLoads.map((dl) => ({ beam: dl.beam, qy: dl.qy, group: dl.group })),
     selfWeight: s.selfWeight,
     materials: s.catalog.materials.map((m) => ({ ...m })),
     sections: s.catalog.sections.map((sec) => ({ ...sec })),
@@ -416,7 +437,8 @@ export function fromJSON(data: SerializedStructure): Structure {
   for (const p of data.nodes) addNode(s, p.x, p.y);
   for (const bm of data.beams) addBeam(s, bm.nodeI, bm.nodeJ, bm.materialId, bm.sectionId);
   for (const sp of data.supports ?? []) setSupport(s, sp.node, sp.type);
-  for (const ld of data.loads ?? []) addPointLoad(s, ld.node, ld.fx, ld.fy, ld.mz);
-  for (const dl of data.distLoads ?? []) addDistLoad(s, dl.beam, dl.qy);
+  // a csoport hiánya 1. verziójú fájlnál: minden teher állandó tehernek számít
+  for (const ld of data.loads ?? []) addPointLoad(s, ld.node, ld.fx, ld.fy, ld.mz, ld.group ?? 'dead');
+  for (const dl of data.distLoads ?? []) addDistLoad(s, dl.beam, dl.qy, dl.group ?? 'dead');
   return s;
 }

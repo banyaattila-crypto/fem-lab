@@ -35,14 +35,21 @@ export interface ElementResult {
   };
   /** a rúd mentén ható megoszló terhek összege (N/m, lokális keresztirányú) */
   distributed: number[];
-  /** a rúd mentén keresett maximumok (abszolút érték) */
-  extremes: { N: number; V: number; M: number; sigma: number; def: number };
+  /** a rúd mentén keresett maximumok: N és V abszolút érték, Nmin a legnagyobb nyomóerő */
+  extremes: { N: number; Nmin: number; V: number; M: number; sigma: number; def: number };
   /** a legnagyobb feszültség helye a rúdon (xi = 0…1) */
   xiSigma: number;
   /** feszültségkihasználtság: max σ / fy (1.0 = a folyáshatár elérése) */
   utilization: number;
   /** hasznos magasságegyenérték a legnagyobb feszültség helyén (m) */
   wNeeded: number;
+  /**
+   * Kihajlási ellenőrzés nyomott rudakhoz:
+   *   N_cr = π²·E·I / (K·L)²   (Euler, rugalmas tartomány)
+   * `bucklingRatio` = |N| / N_cr: 1 fölött a rúd kihajlik, 0.9 fölött figyelmeztet.
+   * A nyomó rudaknál N negatív, ezért a kihajlás a szorító oldalon számít.
+   */
+  buckling?: { Ncr: number; ratio: number; slender: boolean; effectiveLength: number };
 }
 
 export interface Reaction {
@@ -68,6 +75,11 @@ export interface SolveResult {
   /** legnagyobb feszültségkihasználtság (max σ / fy) és a meghatározó rúd sorszáma */
   maxUtilization: number;
   utilizationBeam: number;
+  /** a számításhoz használt terheléskombináció */
+  combo: LoadCombination;
+  /** legnagyobb kihajlási arány (|N|/N_cr) és a meghatározó rúd */
+  maxBuckling: number;
+  bucklingBeam: number;
   maxAbsU: number;
   maxAbsTheta: number;
   maxN: number;
@@ -223,8 +235,22 @@ function consistentLocalLoad(L: number, qLocal: number): number[] {
   return f;
 }
 
+/**
+ * Terheléskombináció: a parancsszorzók terheléscsoportonként. Az alapértelmezett
+ * (1.0 / 1.0) a szolgálati szint. Az önsúly mindig `dead`, ezért az ULS-ben a
+ * `dead` tényezővel szorzódik.
+ */
+export interface LoadCombination {
+  name: string;
+  dead: number;
+  live: number;
+}
+
+export const SLS: LoadCombination = { name: 'SLS (G + Q)', dead: 1, live: 1 };
+export const ULS: LoadCombination = { name: 'ULS (1,35 G + 1,50 Q)', dead: 1.35, live: 1.5 };
+
 /** A szerkezet statikus megoldása. */
-export function solve(s: Structure): SolveResult {
+export function solve(s: Structure, combo: LoadCombination = SLS): SolveResult {
   const base: SolveResult = {
     ok: false,
     u: [],
@@ -234,6 +260,9 @@ export function solve(s: Structure): SolveResult {
     reaction: { fx: 0, fy: 0, mz: 0 },
     maxUtilization: 0,
     utilizationBeam: -1,
+    combo,
+    maxBuckling: 0,
+    bucklingBeam: -1,
     maxAbsU: 0,
     maxAbsTheta: 0,
     maxN: 0,
@@ -282,9 +311,10 @@ export function solve(s: Structure): SolveResult {
 
   // 2. Terhelési vektor: koncentrált terhek
   for (const ld of s.loads) {
-    F[dof(ld.node, 0)]! += ld.fx;
-    F[dof(ld.node, 1)]! += ld.fy;
-    F[dof(ld.node, 2)]! += ld.mz;
+    const f = combo[ld.group];
+    F[dof(ld.node, 0)]! += ld.fx * f;
+    F[dof(ld.node, 1)]! += ld.fy * f;
+    F[dof(ld.node, 2)]! += ld.mz * f;
   }
 
   // 3. Terhelési vektor: megoszló és önsúly (lokális konzisztens terhelés)
@@ -305,10 +335,11 @@ export function solve(s: Structure): SolveResult {
     ];
     for (let i = 0; i < 6; i++) F[dofs[i]!] = F[dofs[i]!]! + fg[i]!;
   };
-  for (const dl of s.distLoads) addDist(dl.beam, dl.qy);
+  for (const dl of s.distLoads) addDist(dl.beam, dl.qy * combo[dl.group]);
   if (s.selfWeight) {
     for (const p of props.values()) {
-      addDist(p.beam.id, -p.A * (s.catalog.materials.find((m) => m.id === p.beam.materialId)?.rho ?? 0) * GRAVITY);
+      const rho = s.catalog.materials.find((m) => m.id === p.beam.materialId)?.rho ?? 0;
+      addDist(p.beam.id, -p.A * rho * GRAVITY * combo.dead);
     }
   }
 
@@ -402,12 +433,14 @@ export function solve(s: Structure): SolveResult {
     let fexternal = [0, 0, 0, 0, 0, 0];
     for (const dl of s.distLoads) {
       if (dl.beam !== p.beam.id) continue;
-      const f = consistentLocalLoad(p.L, dl.qy * p.cos);
+      // a kombináció tényezőjével szorzva, különben az elemi végi erők és a
+      // reakciók nem lennének összhangban a globális terhelésvektorral
+      const f = consistentLocalLoad(p.L, dl.qy * combo[dl.group] * p.cos);
       fexternal = fexternal.map((v, i) => v + f[i]!);
     }
     if (s.selfWeight) {
       const rho = s.catalog.materials.find((m) => m.id === p.beam.materialId)?.rho ?? 0;
-      const f = consistentLocalLoad(p.L, -p.A * rho * GRAVITY * p.cos);
+      const f = consistentLocalLoad(p.L, -p.A * rho * GRAVITY * p.cos * combo.dead);
       fexternal = fexternal.map((v, i) => v + f[i]!);
     }
 
@@ -433,8 +466,8 @@ export function solve(s: Structure): SolveResult {
     };
     const distributed = collected
       .filter((d) => d.beam === p.beam.id)
-      .map((d) => d.qy * p.cos)
-      .concat(s.selfWeight ? [-p.A * rhoOf(s, p.beam) * GRAVITY * p.cos] : []);
+      .map((d) => d.qy * combo[d.group] * p.cos)
+      .concat(s.selfWeight ? [-p.A * rhoOf(s, p.beam) * GRAVITY * p.cos * combo.dead] : []);
     elements.push({
       beam: p.beam.id,
       length: p.L,
@@ -444,7 +477,7 @@ export function solve(s: Structure): SolveResult {
       sigmaMax,
       endForces,
       distributed,
-      extremes: { N: 0, V: 0, M: 0, sigma: 0, def: 0 },
+      extremes: { N: 0, Nmin: 0, V: 0, M: 0, sigma: 0, def: 0 },
       xiSigma: 0,
       utilization: 0,
       wNeeded: 0,
@@ -457,6 +490,8 @@ export function solve(s: Structure): SolveResult {
   const STEP = 32;
   let maxUtilization = 0;
   let utilizationBeam = -1;
+  let maxBuckling = 0;
+  let bucklingBeam = -1;
   let maxAbsU = 0;
   let maxAbsTheta = 0;
   for (let n = 0; n < s.nodes.length; n++) {
@@ -467,7 +502,7 @@ export function solve(s: Structure): SolveResult {
     const p = propsOf.get(e.beam)!;
     const q = e.distributed.reduce((t, v) => t + v, 0);
     const L = e.length;
-    const ex = { N: 0, V: 0, M: 0, sigma: 0, def: 0 };
+    const ex = { N: 0, Nmin: 0, V: 0, M: 0, sigma: 0, def: 0 };
     let xiSigma = 0;
     for (let k = 0; k <= STEP; k++) {
       const xi = k / STEP;
@@ -477,6 +512,7 @@ export function solve(s: Structure): SolveResult {
       const N = -e.endForces.i.n;
       const sigma = Math.abs(N) / p.A + (Math.abs(M) * p.yMax) / p.I;
       if (Math.abs(N) > ex.N) ex.N = Math.abs(N);
+      if (N < ex.Nmin) ex.Nmin = N;
       if (Math.abs(V) > ex.V) ex.V = Math.abs(V);
       if (Math.abs(M) > ex.M) ex.M = Math.abs(M);
       if (sigma > ex.sigma) {
@@ -514,6 +550,20 @@ export function solve(s: Structure): SolveResult {
       maxUtilization = e.utilization;
       utilizationBeam = e.beam;
     }
+    // kihajlás: CSAK nyomott rúd hajlik ki, a húzó nem. A N < 0 a nyomás.
+    if (ex.Nmin < 0 && p.L > 0) {
+      const Ncomp = -ex.Nmin;
+      const E = s.catalog.materials.find((m) => m.id === bm.materialId)?.E ?? 0;
+      const Ncr = (Math.PI * Math.PI * E * p.I) / (L * L);
+      // a nyomó vég keresztmetszeti súlypontjából mért karcsúság
+      const rGy = p.I / p.A;
+      const slender = L / rGy > 200;
+      e.buckling = { Ncr, ratio: Ncomp / Ncr, slender, effectiveLength: L };
+      if (Ncr > 0 && Ncomp / Ncr > maxBuckling) {
+        maxBuckling = Ncomp / Ncr;
+        bucklingBeam = e.beam;
+      }
+    }
   }
 
   // a teljes külső teher: a konzisztens nodal terhelésvektorok összege
@@ -549,6 +599,9 @@ export function solve(s: Structure): SolveResult {
     reaction,
     maxUtilization,
     utilizationBeam,
+    combo,
+    maxBuckling,
+    bucklingBeam,
     maxAbsU,
     maxAbsTheta,
     maxN,

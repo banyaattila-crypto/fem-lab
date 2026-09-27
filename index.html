@@ -43,6 +43,10 @@
         <section class="panel">
           <h2>Számítás</h2>
           <div class="tools two">
+            <select id="combo-select" class="combo-select">
+              <option value="sls">SLS — G + Q</option>
+              <option value="uls">ULS — 1,35 G + 1,50 Q</option>
+            </select>
             <button type="button" id="btn-solve" class="primary">Számítás</button>
             <button type="button" id="btn-deform" aria-pressed="false">Alakzat</button>
           </div>
@@ -67,6 +71,7 @@
               <div><dt>szab. fok</dt><dd id="res-dof">0 / 0</dd></div>
               <div><dt>mérleg</dt><dd id="res-balance">—</dd></div>
               <div><dt>kihasználtság</dt><dd id="res-util">—</dd></div>
+              <div><dt>kihajlás |N|/N<sub>cr</sub></dt><dd id="res-buckling">—</dd></div>
             </dl>
             <table class="table" id="element-table">
               <caption>Rúdonkénti eredmények</caption>
@@ -80,6 +85,7 @@
                   <th>max σ</th>
                   <th>lehajlás</th>
                   <th>kihaszn.</th>
+                  <th>kihajlás</th>
                 </tr>
               </thead>
               <tbody id="element-body"></tbody>
@@ -148,6 +154,13 @@
             </button>
           </div>
           <div class="load-inputs">
+            <label class="row">
+              <span>Terheléscsoport</span>
+              <select id="load-group">
+                <option value="dead">állandó (G)</option>
+                <option value="live">változó (Q)</option>
+              </select>
+            </label>
             <label class="row">
               <span>F<sub>x</sub> (kN)</span>
               <input id="load-fx" type="number" step="1" value="0" />

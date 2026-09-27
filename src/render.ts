@@ -1,5 +1,5 @@
 import { beamSection, nodeById } from './geometry';
-import type { Beam, Structure, SupportType } from './geometry';
+import type { Beam, LoadGroup, Structure, SupportType } from './geometry';
 import { materialById, sectionById } from './catalog';
 import { screenToWorld, worldToScreen } from './camera';
 import type { Camera, Viewport } from './camera';
@@ -36,6 +36,7 @@ export interface SceneState {
   showDiagV: boolean;
   showDiagM: boolean;
   loadValue: { fx: number; fy: number; mz: number; qy: number };
+  loadGroup: LoadGroup;
 }
 
 export const PX = {
@@ -67,6 +68,7 @@ export const COLORS = {
   support: '#7fe0b0',
   supportSelected: '#ffd166',
   load: '#ff8f6b',
+  live: '#7ab8ff',
   loadSelected: '#ffd166',
   ghost: 'rgba(159,176,204,0.55)',
 };
@@ -85,6 +87,15 @@ function niceGridStep(zoom: number, base: number): { minor: number; major: numbe
   else if (n > 2) mult = 2;
   const minor = mult * p;
   return { minor, major: minor * 5 };
+}
+
+/**
+ * A terhelésszín a csoporttól függ: állandó teher narancs, változó kék. Így a
+ * képen látszik, mi számít bele a szolgálati és mi az ULS kombinációba.
+ */
+function loadColor(sel: boolean, g: LoadGroup): string {
+  if (sel) return COLORS.loadSelected;
+  return g === 'live' ? COLORS.live : COLORS.load;
 }
 
 export function drawGrid(ctx: CanvasRenderingContext2D, st: SceneState): void {
@@ -537,7 +548,7 @@ function drawPointLoads(ctx: CanvasRenderingContext2D, st: SceneState): void {
     const n = nodeById(s, ld.node);
     if (!n) continue;
     const p = worldToScreen(cam, vp, n);
-    const color = sel.has(ld.id) ? COLORS.loadSelected : COLORS.load;
+    const color = loadColor(sel.has(ld.id), ld.group);
     if (ld.fx !== 0 || ld.fy !== 0) {
       const mag = Math.hypot(ld.fx, ld.fy);
       const ux = ld.fx / mag;
@@ -581,7 +592,7 @@ function drawDistLoads(ctx: CanvasRenderingContext2D, st: SceneState): void {
     if (!a || !b) continue;
     const pa = worldToScreen(cam, vp, a);
     const pb = worldToScreen(cam, vp, b);
-    const color = sel.has(dl.id) ? COLORS.loadSelected : COLORS.load;
+    const color = loadColor(sel.has(dl.id), dl.group);
     const len = Math.hypot(pb.x - pa.x, pb.y - pa.y);
     if (len < 12) continue;
     const dirX = (pb.x - pa.x) / len;

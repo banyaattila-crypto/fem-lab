@@ -177,7 +177,13 @@ button.small {
   font-size: 12px;
 }
 
-#res-util.over {
+.combo-select {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+#res-util.over,
+#res-buckling.over {
   color: var(--warn);
   font-weight: 700;
 }
