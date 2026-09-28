@@ -393,6 +393,7 @@ fileInput.addEventListener('change', async () => {
   if (!file) return;
   const text = await file.text();
   const ok = editor.importJSON(text);
+  if (ok) fillCatalogSelects();
   setMessage(ok ? `Betöltve: ${file.name}` : 'A fájl nem érvényes modell.');
   fileInput.value = '';
 });

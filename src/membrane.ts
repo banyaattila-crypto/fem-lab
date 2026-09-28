@@ -117,8 +117,9 @@ export interface MembraneResult {
 }
 
 /**
- * A síkrugalmassági (plane stress) alakfüggvény-mátrix. A vastagság itt nem
- * szerepel: a feszültségek a síkban értendők, ezért a mátrix dimenziója Pa.
+ * A síkrugalmassági (plane stress) alakfüggvény-mátrix. A vastagság be van
+ * szorítva, így a mátrix N/m³ nagyságú: a feszültségek Pa-ban, a
+ * elmozdulások m-ben adódnak belőle.
  */
 export function planeStressStiffness(E: number, nu: number, t: number): number[][] {
   const c = E / (1 - nu * nu);

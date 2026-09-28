@@ -1,6 +1,6 @@
 # fem-lab
 
-**2D vázrajzoló, amire a végeselem-számítás épül.**
+**2D vázrajzoló és végeselem-számító: 1D váz + 2D membránlem.**
 
 Az alkalmazás első lépése a rajzolás: a felhasználó a vászonra felrajzolja a szerkezetet
 csomópontokból és rudakból. Ez a rajz a későbbi FEM-számítás geometriai bemenete —
@@ -87,7 +87,8 @@ nyúlik. A `MembraneModel` a bemenet (E, ν, vastagság, csomópontok, elemek,
 rögzítések, pont- és élterhek), a `solveMembrane()` a megoldó.
 
 - **Merevségi mátrix:** 2×2-es Gauss-integrálás (síkbeli nyúlásnál nincs
-  locking, és a nyíróenergiát is jól közelíti).
+  locking, és a nyíróenergiát is jól közelíti). Az `MembraneResult` a
+  folyáshatárhoz viszonyított kihasználtságot is visszaadja.
 - **Feszültség-visszanyerés:** 2×2 Gauss-pontonként σxx, σyy, τxy, fősajtos
   értékek és von Mises; elemenként az átlag és a maximum.
 - **Terhek:** koncentrált csomóponti erők és élterhek. Az élteher a
@@ -106,16 +107,34 @@ feszültség a vastagságtól a keresztmetszeten keresztül függ (`P/(t·h)`), 
 elmozdulás `1/t`.
 
 **Korlát:** a membránelem a síkra merőleges kihajlást NEM számolja. Ehhez három
-szabadsági fokos (w, θx, θy) lemezelem kell — ez külön feladat.
+szabadsági fokos (w, θx, θy) lemezelem kell — ez a következő mérföldkő.
+
+## A 2D mód használata
+
+A sidebar tetején a **Rács (1D)** / **Lemez (2D)** módváltó található. A két
+modell ugyanabban a dokumentumban él: a módváltás, az undo/redo és a
+mentés/visszatöltés mindkettőre vonatkozik, a JSON `membrane2d` mezőben.
+
+1. **Négyzögháló (H)** — húzd a két sarokpont között a téglalapot. A felbontás
+   a *Lemez* panelen állítható (1–40); a sarokpontok rácsra ugranak.
+2. **Peremrögzítés (T)** — kattints a csomópontra. Az irány gomb választja:
+   `ux+uy`, `csak ux` vagy `csak uy`. Újra kattintva a rögzítés törlődik.
+3. **Élteher (Q)** — kattints a szabad perem élre. A `t` a Lemez panelen
+   kN/m-ben adható meg, kifelé húzó értelmezéssel (σ·n). Belső élre nem lehet
+   élterhet tenni.
+4. **Pontteher (E)** — kattints a csomópontra, kN-ban megadott Fx/Fy.
+5. **Számítás (Ctrl+Enter)** — a feszültség- és elmozduláseredmények a
+   *Eredmény* panelen, a von Mises színkép és az *Alakzat* gomb a vászon.
+
+A feszültség- és a kihasználtság-figyelmeztetés a kijelölt katalógusanyag
+karakterisztikus folyáshatárából számít (`f_yd = fy/1,15`).
 
 ## Következő lépések
 
-1. A membránelem integrálása a rajzolóba: négyzögháló generálás, peremtámaszok,
-   élterhek, feszültségszínkép.
-2. Három szabadsági fokos lemezhajlítási elem (w, θx, θy) a síkra merőleges
-   kihajlításhoz.
-3. Szelvényszerkesztő; használhatósági ellenőrzés (lehajláskorlátok).
-4. A kihajlásnál a hatékony hossz valódi végfeltételekből (K-faktor).
+1. Három szabadsági fokos lemezhajlítási elem (w, θx, θy) a síkra merőleges
+   kihajlításhoz — a legfontosabb hiányzó képesség.
+2. A kihajlásnál a hatékony hossz valódi végfeltételekből (K-faktor).
+3. Szelvényszerkesztő; további használhatósági ellenőrzések.
 
 ## Fejlesztés
 

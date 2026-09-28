@@ -120,15 +120,11 @@ export function removeMembraneNode(m: Membrane2D, node: number): void {
   m.loads = m.loads.filter((l) => l.node !== node);
   m.edgeLoads = m.edgeLoads.filter((e) => e.from !== node && e.to !== node);
   for (const el of m.elements) {
-    for (let k = 0; k < el.length; k++) {
-      if (el[k] === node) {
-        el.length = 0;
-        break;
-      }
-    }
+    if (el.includes(node)) el.length = 0;
   }
   m.elements = m.elements.filter((el) => el.length === 4);
-  m.nodes = m.nodes.filter((_, i) => i !== node);
+  // a csomópontok tömbjét még nem szűrtük: az újrasorszámozás a régi
+  // indexesorozatban dolgozik, és ő hozza létre az új tömböt
   reindexMembrane(m);
 }
 
@@ -269,27 +265,40 @@ export interface EdgeHit {
 
 /** a legközelebbi él (a keresési sugáron belül) */
 export function edgeNear(m: Membrane2D, p: { x: number; y: number }, tol: number): EdgeHit | null {
-  const seen = new Set<string>();
+  const counts = boundaryEdgeCounts(m);
   let best: EdgeHit | null = null;
+  for (const [key, count] of counts) {
+    if (count !== 1) continue;
+    const [from, to] = key.split('-').map(Number) as [number, number];
+    const a = m.nodes[from]!;
+    const b = m.nodes[to]!;
+    const d = distToSeg(p, a, b);
+    if (d > tol) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-12) continue;
+    if (!best || d < best.distance) {
+      best = { from, to, distance: d, ux: (b.x - a.x) / len, uy: (b.y - a.y) / len };
+    }
+  }
+  return best;
+}
+
+/**
+ * Az élső számok térképe: az 1-es értékű él szabad perem, a 2-es belső él.
+ * Élteher csak szabad peremen értelmes, ott a belső él két szomszédos elem
+ * közös határa lenne, és a teher kétszer számítódna.
+ */
+function boundaryEdgeCounts(m: Membrane2D): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const el of m.elements) {
     for (let k = 0; k < 4; k++) {
       const from = el[k]!;
       const to = el[(k + 1) % 4]!;
       const key = from < to ? `${from}-${to}` : `${to}-${from}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const a = m.nodes[from]!;
-      const b = m.nodes[to]!;
-      const d = distToSeg(p, a, b);
-      if (d > tol) continue;
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      if (len < 1e-12) continue;
-      if (!best || d < best.distance) {
-        best = { from, to, distance: d, ux: (b.x - a.x) / len, uy: (b.y - a.y) / len };
-      }
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
-  return best;
+  return counts;
 }
 
 /** a pont egy elemen belül van-e (sugár a súlypont felé) */

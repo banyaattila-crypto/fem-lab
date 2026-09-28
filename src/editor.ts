@@ -262,6 +262,9 @@ export class Editor {
     this.preview = null;
     this.previewFrom = -1;
     this.marquee = null;
+    // a kijelölés a másik modellre vonatkozik, ezért a módváltás törli
+    this.selectedNodes = [];
+    this.selectedBeams = [];
     this.clearItemSelection();
     this.tool = mode === '2d' ? 'mesh' : 'beam';
     this.invalidateResult();
