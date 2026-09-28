@@ -109,6 +109,51 @@ export function fixedMask(m: Membrane2D, node: number): number {
   return m.fixed.find((f) => f.node === node)?.mask ?? 0;
 }
 
+/**
+ * Csomópont törlése a hozzá kapcsolódó elemekkel, rögzítésekkel és
+ * terhekkel. Az elemek és csomópontok sorszámozása megmarad, mert a
+ * dokumentumban az ID az index; a felszabaduló helyeken üres elem marad.
+ */
+export function removeMembraneNode(m: Membrane2D, node: number): void {
+  if (node < 0 || node >= m.nodes.length) return;
+  m.fixed = m.fixed.filter((f) => f.node !== node);
+  m.loads = m.loads.filter((l) => l.node !== node);
+  m.edgeLoads = m.edgeLoads.filter((e) => e.from !== node && e.to !== node);
+  for (const el of m.elements) {
+    for (let k = 0; k < el.length; k++) {
+      if (el[k] === node) {
+        el.length = 0;
+        break;
+      }
+    }
+  }
+  m.elements = m.elements.filter((el) => el.length === 4);
+  m.nodes = m.nodes.filter((_, i) => i !== node);
+  reindexMembrane(m);
+}
+
+/** Az üres helyek után újrasorszámozza a csomópontokat és az elemeket. */
+function reindexMembrane(m: Membrane2D): void {
+  const live = m.nodes.map((_, i) => i).filter((i) => m.elements.some((el) => el.includes(i)));
+  const map = new Map<number, number>();
+  live.forEach((old, idx) => map.set(old, idx));
+  m.nodes = live.map((i) => m.nodes[i]!);
+  m.elements = m.elements.map((el) => el.map((n) => map.get(n)!) as [number, number, number, number]);
+  m.fixed = m.fixed
+    .filter((f) => map.has(f.node))
+    .map((f) => ({ node: map.get(f.node)!, mask: f.mask }));
+  m.loads = m.loads.filter((l) => map.has(l.node)).map((l) => ({ ...l, node: map.get(l.node)! }));
+  m.edgeLoads = m.edgeLoads
+    .filter((e) => map.has(e.from) && map.has(e.to))
+    .map((e) => ({ ...e, from: map.get(e.from)!, to: map.get(e.to)! }));
+}
+
+/** A lemezvastagság és a háló felbontásának beállítása. */
+export function setMembraneSize(m: Membrane2D, thickness: number, divisions: number): void {
+  m.thickness = thickness > 0 ? thickness : 0.01;
+  m.divisions = Math.max(1, Math.min(40, Math.round(divisions)));
+}
+
 export function addMembraneLoad(m: Membrane2D, node: number, fx: number, fy: number): void {
   const hit = m.loads.find((l) => l.node === node);
   if (hit) {

@@ -28,6 +28,24 @@ import { canRedo, canUndo, commit, createHistory, redo, undo } from './history';
 import type { HistoryState } from './history';
 import type { SceneState, Tool } from './render';
 import type { LoadGroup } from './geometry';
+import { materialById } from './catalog';
+import {
+  addMembraneEdgeLoad,
+  addMembraneLoad,
+  addRectMesh,
+  createMembrane2D,
+  edgeNear,
+  membrane2DBounds,
+  membrane2DIsEmpty,
+  nodeNear,
+  removeMembraneNode,
+  setFixed,
+  setMembraneSize,
+  toMembraneModel,
+} from './membrane2d';
+import type { Membrane2D } from './membrane2d';
+import { solveMembrane } from './membrane';
+import type { MembraneResult } from './membrane';
 import type { SolveResult } from './solver';
 import { worldToScreen } from './camera';
 import { PX } from './render';
@@ -80,6 +98,15 @@ export class Editor {
   loadValue: LoadValues = { fx: 0, fy: -10000, mz: 0, qy: -5000 };
   /** az újonnan rajzolt terhek csoportja (állandó vagy változó teher) */
   loadGroup: LoadGroup = 'dead';
+  /** szerkesztési mód: 1D váz vagy 2D membrán */
+  mode: '1d' | '2d' = '1d';
+  /** a 2D membránmodell számsítási eredménye */
+  membraneResult: MembraneResult | null = null;
+  /** a 2D rögzítés maszkja: 1 = ux, 2 = uy, 3 = mindkettő */
+  membraneFixMask = 3;
+  /** az új élterhek értéke [N/m] és a pontterhek [N] */
+  membraneEdgeValue = 1000;
+  membraneNodeValue: { fx: number; fy: number } = { fx: 0, fy: -1000 };
   hoverNode = -1;
   hoverBeam = -1;
   preview: Point | null = null;
@@ -136,6 +163,9 @@ export class Editor {
       showDiagN: this.showDiagN,
       showDiagV: this.showDiagV,
       showDiagM: this.showDiagM,
+      membrane2d: this.mode === '2d' ? this.membrane2d : null,
+      membraneResult: this.membraneResult,
+      previewFromPoint: this.previewFromPoint,
     };
   }
 
@@ -198,6 +228,7 @@ export class Editor {
   /** A modell megváltozott: a korábbi eredmény már nem érvényes. */
   invalidateResult(): void {
     this.result = null;
+    this.membraneResult = null;
   }
 
   /** Előzmény-mentés a modell módosítása előtt, az eredmény érvénytelenítésével. */
@@ -208,6 +239,171 @@ export class Editor {
 
   private toScreen(p: Point): Point {
     return worldToScreen(this.camera, this.viewport, p);
+  }
+
+  /** a 2D membránmodell; szükség esetén létrehozva */
+  get membrane2d(): Membrane2D {
+    if (!this.structure.membrane2d) this.structure.membrane2d = createMembrane2D();
+    return this.structure.membrane2d;
+  }
+
+  /** Van-e rajzolható 2D modell? (üres modellnél a hálórajzoló eszközt kikapcsoljuk) */
+  hasMembraneMesh(): boolean {
+    return !!this.structure.membrane2d && !membrane2DIsEmpty(this.structure.membrane2d);
+  }
+
+  /**
+   * Váltás az 1D és a 2D mód között. A modell megmarad, csak a szerkesztő
+   * eszközkészlete és a megjelenítés változik.
+   */
+  setMode(mode: '1d' | '2d'): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.preview = null;
+    this.previewFrom = -1;
+    this.marquee = null;
+    this.clearItemSelection();
+    this.tool = mode === '2d' ? 'mesh' : 'beam';
+    this.invalidateResult();
+    this.emit();
+  }
+
+  /** A 2D modell méretei: lemezvastagság [m] és hálófelbontás. */
+  setMembraneSize(thickness: number, divisions: number): void {
+    this.snapshot();
+    setMembraneSize(this.membrane2d, thickness, divisions);
+    this.emit();
+  }
+
+  /**
+   * A 2D modell számsítása a kiválasztott katalógusanyaggal. A háló
+   * konzisztenciahibájánál és a szingularitásnál is sikertelen eredményt ad.
+   */
+  solveMembraneModel(): MembraneResult | null {
+    const m = this.structure.membrane2d;
+    if (!m || membrane2DIsEmpty(m)) {
+      this.membraneResult = null;
+      this.emit();
+      return null;
+    }
+    const mat = materialById(this.structure.catalog, this.materialId) ?? this.structure.catalog.materials[0];
+    if (!mat) {
+      this.membraneResult = null;
+      this.emit();
+      return null;
+    }
+    const res = solveMembrane(toMembraneModel(m, mat.E, mat.nu));
+    res.yield = (mat.fy * 1e6) / 1.15;
+    res.utilization = res.maxVonMises / res.yield;
+    this.membraneResult = res;
+    this.emit();
+    return res;
+  }
+
+  /** A 2D modellre állítja a kamerát, hogy teljesen látszódjon. */
+  fitMembrane(): void {
+    const m = this.structure.membrane2d;
+    if (!m || m.nodes.length === 0) return;
+    const b = membrane2DBounds(m);
+    if (!b) return;
+    this.camera = fitToPoints(
+      this.camera,
+      this.viewport,
+      [
+        { x: b.minX, y: b.minY },
+        { x: b.maxX, y: b.maxY },
+      ],
+      80,
+    );
+    this.emit();
+  }
+
+  // --- 2D membrán szerkesztés -------------------------------------------
+
+  private pointerDown2D(w: Point): void {
+    const m = this.membrane2d;
+    switch (this.tool) {
+      case 'mesh': {
+        // a téglalap első sarokpontja a lenyomás helye, a második az egér
+        this.dragFrom2D = w;
+        this.preview = w;
+        this.emit();
+        return;
+      }
+      case 'fix': {
+        const n = nodeNear(m, w, this.tol());
+        if (n < 0) return;
+        this.snapshot();
+        const cur = m.fixed.find((f) => f.node === n)?.mask ?? 0;
+        setFixed(m, n, cur === this.membraneFixMask ? 0 : this.membraneFixMask);
+        this.emit();
+        return;
+      }
+      case 'edgeLoad': {
+        const hit = edgeNear(m, w, this.tol() * 1.5);
+        if (!hit) return;
+        this.snapshot();
+        addMembraneEdgeLoad(m, hit.from, hit.to, this.membraneEdgeValue);
+        this.emit();
+        return;
+      }
+      case 'nodeLoad': {
+        const n = nodeNear(m, w, this.tol());
+        if (n < 0) return;
+        this.snapshot();
+        addMembraneLoad(m, n, this.membraneNodeValue.fx, this.membraneNodeValue.fy);
+        this.emit();
+        return;
+      }
+      default: {
+        const n = nodeNear(m, w, this.tol());
+        this.selectedNodes = n >= 0 ? [n] : [];
+        this.emit();
+      }
+    }
+  }
+
+  /** a 2D hálórajzoló első sarokpontja (húzás közben) */
+  private dragFrom2D: Point | null = null;
+  /** a húzás első sarokpontja a jelenet számára */
+  private previewFromPoint: Point | null = null;
+
+  private pointerMove2D(w: Point): void {
+    const m = this.membrane2d;
+    if (this.tool === 'mesh') {
+      this.preview = this.dragFrom2D ? w : null;
+      this.previewFromPoint = this.dragFrom2D;
+      this.emit();
+      return;
+    }
+    this.hoverNode = nodeNear(m, w, this.tol());
+    this.emit();
+  }
+
+  private pointerUp2D(): void {
+    const m = this.membrane2d;
+    if (this.tool === 'mesh' && this.dragFrom2D && this.preview) {
+      const a = this.dragFrom2D;
+      const b = this.preview;
+      if (Math.abs(a.x - b.x) > this.tol() && Math.abs(a.y - b.y) > this.tol()) {
+        this.snapshot();
+        addRectMesh(m, a, b, m.divisions);
+      }
+    }
+    this.dragFrom2D = null;
+    this.preview = null;
+    this.previewFromPoint = null;
+    this.emit();
+  }
+
+  private deleteSelection2D(): boolean {
+    const m = this.structure.membrane2d;
+    if (!m || this.selectedNodes.length === 0) return false;
+    this.snapshot();
+    for (const id of [...this.selectedNodes].sort((a, b) => b - a)) removeMembraneNode(m, id);
+    this.selectedNodes = [];
+    this.emit();
+    return true;
   }
 
   setTool(t: Tool): void {
@@ -239,6 +435,11 @@ export class Editor {
     const w = this.worldPoint(p);
     this.dragOrigin = p;
     this.dragMoved = false;
+
+    if (this.mode === '2d') {
+      this.pointerDown2D(w);
+      return;
+    }
 
     if (this.tool === 'node') {
       this.snapshot();
@@ -424,6 +625,10 @@ export class Editor {
 
   pointerMove(p: Point): void {
     const w = this.worldPoint(p);
+    if (this.mode === '2d') {
+      this.pointerMove2D(w);
+      return;
+    }
     if (this.dragMode === 'nodes') {
       this.dragMoved = true;
       for (const id of this.selectedNodes) moveNode(this.structure, id, w.x, w.y);
@@ -450,6 +655,10 @@ export class Editor {
   }
 
   pointerUp(additive = false): void {
+    if (this.mode === '2d') {
+      this.pointerUp2D();
+      return;
+    }
     if (this.dragMode === 'marquee' && this.marquee) this.applyMarquee(additive);
     if (this.dragMode === 'nodes' && !this.dragMoved) {
       this.history.past.pop();
@@ -491,6 +700,7 @@ export class Editor {
   }
 
   deleteSelection(): void {
+    if (this.mode === '2d' && this.deleteSelection2D()) return;
     const hasAnything =
       this.selectedNodes.length > 0 ||
       this.selectedBeams.length > 0 ||
@@ -513,7 +723,7 @@ export class Editor {
   }
 
   clearAll(): void {
-    if (this.structure.nodes.length === 0) return;
+    if (this.structure.nodes.length === 0 && !this.hasMembraneMesh()) return;
     this.snapshot();
     this.structure = createStructure();
     this.invalidateResult();

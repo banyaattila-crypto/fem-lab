@@ -103,6 +103,15 @@ export interface MembraneResult {
   reaction: { fx: number; fy: number };
   maxU: number;
   maxVonMises: number;
+  maxSxx: number;
+  maxSyy: number;
+  maxSxy: number;
+  dof: { fixed: number; total: number };
+  forceBalance: { error: number; appliedFx: number };
+  /** folyáshatár [Pa] */
+  yield: number;
+  /** kihasználtság: max |σ| / f_yd */
+  utilization: number;
   /** a meghatározó elem a legnagyobb egyenérték feszültségnél */
   criticalElement: number;
 }
@@ -213,6 +222,13 @@ export function solveMembrane(m: MembraneModel): MembraneResult {
     reaction: { fx: 0, fy: 0 },
     maxU: 0,
     maxVonMises: 0,
+    maxSxx: 0,
+    maxSyy: 0,
+    maxSxy: 0,
+    dof: { fixed: 0, total: 0 },
+    forceBalance: { error: 0, appliedFx: 0 },
+    yield: 0,
+    utilization: 0,
     criticalElement: -1,
   });
 
@@ -420,6 +436,13 @@ export function solveMembrane(m: MembraneModel): MembraneResult {
     reaction,
     maxU,
     maxVonMises,
+    maxSxx: elementResults.reduce((mx, e) => Math.max(mx, Math.abs(e.sxx)), 0),
+    maxSyy: elementResults.reduce((mx, e) => Math.max(mx, Math.abs(e.syy)), 0),
+    maxSxy: elementResults.reduce((mx, e) => Math.max(mx, Math.abs(e.sxy)), 0),
+    dof: { fixed: ndof - free, total: ndof },
+    forceBalance: { error: Math.abs(applied.fx - reaction.fx) + Math.abs(applied.fy - reaction.fy), appliedFx: applied.fx },
+    yield: 0,
+    utilization: 0,
     criticalElement,
   };
 }

@@ -70,6 +70,24 @@ const gridInput = el<HTMLInputElement>('#grid-step');
 const snapInput = el<HTMLInputElement>('#snap-toggle');
 const coordLabel = el<HTMLElement>('#coord');
 const message = el<HTMLElement>('#message');
+const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mode]'));
+const fixButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-fix]'));
+const panels1D = Array.from(document.querySelectorAll<HTMLElement>('[data-1d-only]'));
+const panels2D = Array.from(document.querySelectorAll<HTMLElement>('[data-2d-only]'));
+const m2Thickness = el<HTMLInputElement>('#m2-thickness');
+const m2Divisions = el<HTMLInputElement>('#m2-divisions');
+const m2Edge = el<HTMLInputElement>('#m2-edge');
+const m2Fx = el<HTMLInputElement>('#m2-fx');
+const m2Fy = el<HTMLInputElement>('#m2-fy');
+const m2Results = el<HTMLElement>('#m2-results');
+const m2ResU = el<HTMLElement>('#m2-res-u');
+const m2ResVm = el<HTMLElement>('#m2-res-vm');
+const m2ResSxx = el<HTMLElement>('#m2-res-sxx');
+const m2ResSxy = el<HTMLElement>('#m2-res-sxy');
+const m2ResDof = el<HTMLElement>('#m2-res-dof');
+const m2ResBalance = el<HTMLElement>('#m2-res-balance');
+const m2ElementBody = el<HTMLTableSectionElement>('#m2-element-body');
+const m2ReactionBody = el<HTMLTableSectionElement>('#m2-reaction-body');
 
 function resize(): void {
   const rect = canvas.parentElement?.getBoundingClientRect();
@@ -94,10 +112,19 @@ function draw(): void {
 }
 
 function refresh(): void {
-  statNodes.textContent = String(editor.structure.nodes.length);
-  statBeams.textContent = String(editor.structure.beams.length);
-  statSupports.textContent = String(editor.structure.supports.length);
-  statLoads.textContent = String(editor.structure.loads.length + editor.structure.distLoads.length);
+  const is2D = editor.mode === '2d';
+  statNodes.textContent = is2D
+    ? String(editor.structure.membrane2d?.nodes.length ?? 0)
+    : String(editor.structure.nodes.length);
+  statBeams.textContent = is2D
+    ? String(editor.structure.membrane2d?.elements.length ?? 0)
+    : String(editor.structure.beams.length);
+  statSupports.textContent = is2D
+    ? String(editor.structure.membrane2d?.fixed.length ?? 0)
+    : String(editor.structure.supports.length);
+  statLoads.textContent = is2D
+    ? String((editor.structure.membrane2d?.loads.length ?? 0) + (editor.structure.membrane2d?.edgeLoads.length ?? 0))
+    : String(editor.structure.loads.length + editor.structure.distLoads.length);
   statLength.textContent = `${editor.totalLength().toFixed(2)} m`;
   const { mass, weight } = editor.totalMassAndWeight();
   statMass.textContent = mass >= 1000 ? `${(mass / 1000).toFixed(2)} t` : `${mass.toFixed(0)} kg`;
@@ -118,12 +145,13 @@ function refresh(): void {
       b.setAttribute('aria-pressed', 'false');
     }
   }
-  const hasSel =
-    editor.selectedNodes.length > 0 ||
-    editor.selectedBeams.length > 0 ||
-    editor.selectedSupports.length > 0 ||
-    editor.selectedLoads.length > 0 ||
-    editor.selectedDist.length > 0;
+  const hasSel = is2D
+    ? editor.selectedNodes.length > 0
+    : editor.selectedNodes.length > 0 ||
+      editor.selectedBeams.length > 0 ||
+      editor.selectedSupports.length > 0 ||
+      editor.selectedLoads.length > 0 ||
+      editor.selectedDist.length > 0;
   btnDelete.disabled = !hasSel;
 }
 
@@ -144,6 +172,10 @@ const TOOL_HINTS: Record<Tool, string> = {
   force: 'Konc. erő: kattints a csomópontra. Az értéket a Terhek panelen írd be.',
   moment: 'Nyomaték: kattints a csomópontra. Az értéket a Terhek panelen írd be.',
   dist: 'Megoszló teher: kattints a rúdra. Az értéket a Terhek panelen írd be.',
+  mesh: 'Négyzögháló: húzd a két sarokpont között a téglalapot; a felbontás a Lemez panelen állítható.',
+  fix: 'Peremrögzítés: kattints a csomópontra. Az irányt a gombok választják; újra kattintva töröl.',
+  edgeLoad: 'Élteher: kattints a perem élre. A t értéke a Terhek panelen állítható.',
+  nodeLoad: 'Pontteher: kattints a csomópontra. Az értéket a Terhek panelen írd be.',
 };
 
 function setTool(tool: Tool): void {
@@ -165,6 +197,37 @@ function setSupportType(type: SupportType): void {
 
 for (const btn of supportButtons) {
   btn.addEventListener('click', () => setSupportType(btn.dataset.support as SupportType));
+}
+
+function setMode(mode: '1d' | '2d'): void {
+  editor.setMode(mode);
+  for (const b of modeButtons) {
+    b.classList.toggle('active', b.dataset.mode === mode);
+    b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  }
+  for (const p of panels1D) p.hidden = mode === '2d';
+  for (const p of panels2D) p.hidden = mode === '1d';
+  for (const b of toolButtons) b.classList.toggle('active', false);
+  if (mode === '1d') {
+    setTool('beam');
+    btnFit.onclick = () => { editor.fit(); };
+  } else {
+    setTool('mesh');
+    btnFit.onclick = () => { editor.fitMembrane(); };
+    m2Thickness.value = String(editor.membrane2d.thickness * 1000);
+    m2Divisions.value = String(editor.membrane2d.divisions);
+    push2DInputs();
+  }
+  setMessage(mode === '1d' ? '1D váz mód — rúdháló szerkesztése.' : '2D membrán mód — négyzögháló szerkesztése.');
+  draw();
+}
+
+function push2DInputs(): void {
+  editor.membraneEdgeValue = (Number(m2Edge.value) || 0) * 1000;
+  editor.membraneNodeValue = {
+    fx: (Number(m2Fx.value) || 0) * 1000,
+    fy: (Number(m2Fy.value) || 0) * 1000,
+  };
 }
 
 function pushLoadValues(): void {
@@ -282,16 +345,22 @@ window.addEventListener('keydown', (e) => {
       setTool('support');
       break;
     case 'e':
-      setTool('force');
+      setTool(editor.mode === '2d' ? 'nodeLoad' : 'force');
       break;
     case 'm':
-      setTool('moment');
+      if (editor.mode === '1d') setTool('moment');
       break;
     case 'q':
-      setTool('dist');
+      setTool(editor.mode === '2d' ? 'edgeLoad' : 'dist');
+      break;
+    case 'h':
+      if (editor.mode === '2d') setTool('mesh');
       break;
     case 'f':
-      editor.fit();
+      if (editor.mode === '1d') { setTool('support'); } else { setTool('fix'); }
+      break;
+    case 'F':
+      editor.mode === '1d' ? editor.fit() : editor.fitMembrane();
       break;
     default:
       break;
@@ -403,7 +472,66 @@ const SUPPORT_LABEL: Record<SupportType, string> = {
   fixed: 'befogás',
 };
 
+function runSolve2D(): void {
+  const r = editor.solveMembraneModel();
+  if (!r || !r.ok) {
+    m2Results.hidden = true;
+    setMessage(r?.error ?? 'Nincs háló a számításhoz.');
+    draw();
+    return;
+  }
+  const toMPa = (v: number) => (v / 1e6).toFixed(1);
+  const toMM = (v: number) => (v * 1000).toFixed(3);
+  m2ResU.textContent = `${toMM(r.maxU)} mm`;
+  m2ResVm.textContent = `${toMPa(r.maxVonMises)} MPa`;
+  m2ResSxx.textContent = `${toMPa(r.maxSxx)} MPa`;
+  m2ResSxy.textContent = `${toMPa(r.maxSxy)} MPa`;
+  m2ResDof.textContent = `${r.dof.fixed} / ${r.dof.total}`;
+  const rel = r.forceBalance.error / Math.max(1, Math.abs(r.forceBalance.appliedFx));
+  m2ResBalance.textContent = rel < 1e-6 ? 'zárt' : `eltérés ${rel.toExponential(1)}`;
+  m2ElementBody.innerHTML = '';
+  for (const e of r.elements) {
+    const tr = document.createElement('tr');
+    if (e.element === r.criticalElement) tr.classList.add('governing');
+    for (const text of [
+      `#${e.element + 1}`,
+      toMPa(e.sxx),
+      toMPa(e.syy),
+      toMPa(Math.abs(e.sxy)),
+      toMPa(e.vonMises),
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.append(td);
+    }
+    m2ElementBody.append(tr);
+  }
+  m2ReactionBody.innerHTML = '';
+  for (const rx of r.reactions) {
+    const tr = document.createElement('tr');
+    const mask = editor.structure.membrane2d?.fixed.find((f) => f.node === rx.node);
+    const label = mask?.mask === 3 ? 'ux+uy' : mask?.mask === 1 ? 'ux' : 'uy';
+    for (const text of [`#${rx.node + 1}`, label, toMPa(rx.fx), toMPa(rx.fy)]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.append(td);
+    }
+    m2ReactionBody.append(tr);
+  }
+  m2Results.hidden = false;
+  if (r.utilization > 1) {
+    setMessage(
+      `Feszültség túl magas (${toMPa(r.maxVonMises)} MPa > ${toMPa(r.yield)} MPa) — ` +
+        `a folyáshatár átlépve a ${r.criticalElement + 1}. elemen.`,
+    );
+  } else {
+    setMessage(`Számsítás kész: max σ = ${toMPa(r.maxSxx)} MPa, max von Mises = ${toMPa(r.maxVonMises)} MPa.`);
+  }
+  draw();
+}
+
 function runSolve(): void {
+  if (editor.mode === '2d') { runSolve2D(); return; }
   const combo = comboSelect.value === 'uls' ? ULS : SLS;
   const r = solve(editor.structure, combo);
   editor.result = r;
@@ -533,6 +661,31 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.ctrlKey) {
     e.preventDefault();
     runSolve();
+  }
+});
+
+for (const btn of fixButtons) {
+  btn.addEventListener('click', () => {
+    editor.membraneFixMask = Number(btn.dataset.fix) || 3;
+    for (const b of fixButtons) b.classList.toggle('active', b === btn);
+  });
+}
+
+for (const btn of modeButtons) {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode as '1d' | '2d'));
+}
+
+for (const input of [m2Thickness, m2Divisions, m2Edge, m2Fx, m2Fy]) {
+  input.addEventListener('input', () => {
+    editor.setMembraneSize(Number(m2Thickness.value) || 10, Number(m2Divisions.value) || 4);
+    push2DInputs();
+  });
+}
+
+editor.onChange(() => {
+  if (editor.mode === '2d') {
+    m2Thickness.value = String(editor.membrane2d.thickness * 1000);
+    m2Divisions.value = String(editor.membrane2d.divisions);
   }
 });
 

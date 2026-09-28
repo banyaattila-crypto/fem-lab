@@ -111,7 +111,7 @@ describe('app wiring', () => {
     for (const id of ids) {
       expect(document.querySelector(`#${id}`), `#${id} hiányzik az index.html-ből`).not.toBeNull();
     }
-    expect(document.querySelectorAll('[data-tool]').length).toBe(7);
+    expect(document.querySelectorAll('[data-tool]').length).toBe(12);
     expect(document.querySelectorAll('[data-support]').length).toBe(3);
   });
 

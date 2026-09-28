@@ -18,6 +18,11 @@
           <p>2D vázrajzoló — a FEM alapja</p>
         </header>
 
+        <div class="segmented mode-switch" role="group" aria-label="Számítási mód">
+          <button type="button" data-mode="1d" class="active" aria-pressed="true">Rács (1D)</button>
+          <button type="button" data-mode="2d" aria-pressed="false">Lemez (2D)</button>
+        </div>
+
         <section class="panel">
           <h2>Anyag és szelvény</h2>
           <div class="load-inputs">
@@ -43,24 +48,24 @@
         <section class="panel">
           <h2>Számítás</h2>
           <div class="tools two">
-            <select id="combo-select" class="combo-select">
+            <select id="combo-select" class="combo-select" data-1d-only>
               <option value="sls">SLS — G + Q</option>
               <option value="uls">ULS — 1,35 G + 1,50 Q</option>
             </select>
             <button type="button" id="btn-solve" class="primary">Számítás</button>
             <button type="button" id="btn-deform" aria-pressed="false">Alakzat</button>
           </div>
-          <div class="tools" id="diagram-toggles">
+          <div class="tools" id="diagram-toggles" data-1d-only>
             <button type="button" id="btn-diag-n" class="small diag-n" aria-pressed="false">N diagram</button>
             <button type="button" id="btn-diag-v" class="small diag-v" aria-pressed="false">V diagram</button>
             <button type="button" id="btn-diag-m" class="small diag-m" aria-pressed="false">M diagram</button>
           </div>
-          <p class="hint" id="solve-hint">
+          <p class="hint" id="solve-hint" data-1d-only>
             Euler–Bernoulli rúdelem, 3 szabadsági fok csomópontonként. Először
             oszd fel a rudakat rövidebb elemekre (max. 1 m), ha a lehajlás
             közepénél fontos a pontosság.
           </p>
-          <div id="results" hidden>
+          <div id="results" hidden data-1d-only>
             <dl class="stats results">
               <div><dt>max |N|</dt><dd id="res-n">0 kN</dd></div>
               <div><dt>max |M|</dt><dd id="res-m">0 kN·m</dd></div>
@@ -106,7 +111,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-1d-only>
           <h2>Eszköz</h2>
           <div class="tools">
             <button type="button" data-tool="beam" class="active" aria-pressed="true">
@@ -122,7 +127,7 @@
           <p id="message" class="hint">Rúd: kattints a kezdőpontra, majd a végpontokra.</p>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-1d-only>
           <h2>Támaszok</h2>
           <div class="tools">
             <button type="button" data-tool="support" aria-pressed="false">
@@ -140,7 +145,7 @@
           </p>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-1d-only>
           <h2>Terhek</h2>
           <div class="tools">
             <button type="button" data-tool="force" aria-pressed="false">
@@ -181,7 +186,7 @@
           <p class="hint">Konc. erő/nyomaték: kattints csomópontra. Megoszló: kattints a rúdra.</p>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-1d-only>
           <h2>Rács</h2>
           <label class="row">
             <span>Rácslépés (m)</span>
@@ -220,6 +225,119 @@
           </div>
           <button type="button" id="btn-clear" class="danger">Rajz törlése</button>
           <input id="file-input" type="file" accept="application/json" hidden />
+        </section>
+
+        <section class="panel" data-2d-only hidden>
+          <h2>Lemez</h2>
+          <div class="load-inputs">
+            <label class="row">
+              <span>Vastagság (mm)</span>
+              <input id="m2-thickness" type="number" min="0.1" step="0.5" value="10" />
+            </label>
+            <label class="row">
+              <span>Felbontás (elem)</span>
+              <input id="m2-divisions" type="number" min="1" max="40" step="1" value="4" />
+            </label>
+          </div>
+          <p class="hint">
+            A vastagság a merevségi mátrixban és a feszültségekben is
+            szerepel: az erő a keresztmetszeten oszlik el.
+          </p>
+        </section>
+
+        <section class="panel" data-2d-only hidden>
+          <h2>Eszköz</h2>
+          <div class="tools">
+            <button type="button" data-tool="mesh" class="active" aria-pressed="true">
+              Négyzögháló <kbd>H</kbd>
+            </button>
+            <button type="button" data-tool="fix" aria-pressed="false">
+              Peremrögzítés <kbd>T</kbd>
+            </button>
+            <button type="button" data-tool="edgeLoad" aria-pressed="false">
+              Élteher <kbd>Q</kbd>
+            </button>
+            <button type="button" data-tool="nodeLoad" aria-pressed="false">
+              Pontteher <kbd>E</kbd>
+            </button>
+            <button type="button" data-tool="select" aria-pressed="false">
+              Kijelölés <kbd>V</kbd>
+            </button>
+          </div>
+          <div class="segmented" role="group" aria-label="Rögzítés iránya">
+            <button type="button" data-fix="3" class="active">ux + uy</button>
+            <button type="button" data-fix="1">csak ux</button>
+            <button type="button" data-fix="2">csak uy</button>
+          </div>
+          <p class="hint">
+            Háló: húzz a két sarokpont között. Rögzítés: kattints a csomópontra
+            (újra kattintva töröl). Élteher: kattints a perem élre.
+          </p>
+        </section>
+
+        <section class="panel" data-2d-only hidden>
+          <h2>Terhek</h2>
+          <div class="load-inputs">
+            <label class="row">
+              <span>Élteher t (kN/m)</span>
+              <input id="m2-edge" type="number" step="0.5" value="1" />
+            </label>
+            <label class="row">
+              <span>F<sub>x</sub> (kN)</span>
+              <input id="m2-fx" type="number" step="1" value="0" />
+            </label>
+            <label class="row">
+              <span>F<sub>y</sub> (kN)</span>
+              <input id="m2-fy" type="number" step="1" value="-10" />
+            </label>
+          </div>
+          <p class="hint">
+            Az élteher a kijelölt élre merőlegesen, kifelé húz (σ·n). A pozitív
+            érték tehát a lemezből kifelé mutat.
+          </p>
+        </section>
+
+        <section class="panel" data-2d-only hidden>
+          <h2>Eredmény</h2>
+          <div id="m2-results" hidden>
+            <dl class="stats results">
+              <div><dt>max |u|</dt><dd id="m2-res-u">0 mm</dd></div>
+              <div><dt>max von Mises</dt><dd id="m2-res-vm">0 MPa</dd></div>
+              <div><dt>max |σ<sub>x</sub>|</dt><dd id="m2-res-sxx">0 MPa</dd></div>
+              <div><dt>max |τ<sub>xy</sub>|</dt><dd id="m2-res-sxy">0 MPa</dd></div>
+              <div><dt>szab. fok</dt><dd id="m2-res-dof">0 / 0</dd></div>
+              <div><dt>mérleg</dt><dd id="m2-res-balance">—</dd></div>
+            </dl>
+            <table class="table">
+              <caption>Elemenkénti átlag feszültségek</caption>
+              <thead>
+                <tr>
+                  <th>elem</th>
+                  <th>σ<sub>x</sub> (MPa)</th>
+                  <th>σ<sub>y</sub> (MPa)</th>
+                  <th>τ<sub>xy</sub> (MPa)</th>
+                  <th>von Mises (MPa)</th>
+                </tr>
+              </thead>
+              <tbody id="m2-element-body"></tbody>
+            </table>
+            <table class="table">
+              <caption>Reakciók</caption>
+              <thead>
+                <tr>
+                  <th>csomópont</th>
+                  <th>rögzítés</th>
+                  <th>F<sub>x</sub> (kN)</th>
+                  <th>F<sub>y</sub> (kN)</th>
+                </tr>
+              </thead>
+              <tbody id="m2-reaction-body"></tbody>
+            </table>
+          </div>
+          <p class="hint" id="m2-hint">
+            Síkrugalmassági Q4 elem, 2 szabadsági fok csomópontonként. Nincs
+            síkra merőleges kihajlás — ahhoz külön lemezelem kell.
+          </p>
         </section>
 
         <footer class="legend">

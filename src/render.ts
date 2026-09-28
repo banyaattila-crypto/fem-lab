@@ -6,8 +6,25 @@ import type { Camera, Viewport } from './camera';
 import type { SolveResult } from './solver';
 import { deformedNode, deformedPointAt, internalAt } from './solver';
 import type { Point } from './geometry';
+import type { MembraneResult } from './membrane';
+import type { Membrane2D } from './membrane2d';
 
-export type Tool = 'select' | 'node' | 'beam' | 'support' | 'force' | 'moment' | 'dist';
+/**
+ * Eszközök. Az első hét az 1D vázszerkesztőé, a 'mesh'|'fix'|'edgeLoad'|
+ * 'nodeLoad' a 2D membránszerkesztőé.
+ */
+export type Tool =
+  | 'select'
+  | 'node'
+  | 'beam'
+  | 'support'
+  | 'force'
+  | 'moment'
+  | 'dist'
+  | 'mesh'
+  | 'fix'
+  | 'edgeLoad'
+  | 'nodeLoad';
 
 export interface SceneState {
   structure: Structure;
@@ -37,6 +54,11 @@ export interface SceneState {
   showDiagM: boolean;
   loadValue: { fx: number; fy: number; mz: number; qy: number };
   loadGroup: LoadGroup;
+  /** a 2D membránmodell és annak számsítási eredménye (2D módban) */
+  membrane2d: Membrane2D | null;
+  membraneResult: MembraneResult | null;
+  /** a 2D hálórajzoló első sarokpontja (húzás közben) */
+  previewFromPoint: Point | null;
 }
 
 export const PX = {
@@ -387,6 +409,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, st: SceneState): void {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, st.viewport.width, st.viewport.height);
   drawGrid(ctx, st);
+  if (st.membrane2d) {
+    drawMembrane2D(ctx, st, st.membrane2d, st.membraneResult, st.showDeform);
+    drawMembranePreview(ctx, st);
+    drawMarquee(ctx, st);
+    return;
+  }
   drawStructure(ctx, st);
   drawDiagrams(ctx, st);
   if (st.showDeform && st.result) drawDeformed(ctx, st);
@@ -618,5 +646,253 @@ function drawDistLoads(ctx: CanvasRenderingContext2D, st: SceneState): void {
     }
     const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
     drawLabel(ctx, mid.x + 10, mid.y + nrmY * off * 0.5, `q = ${fmtKN(dl.qy)}/m`);
+  }
+}
+
+/**
+ * A 2D membránmodell rajzolása. A háló vonalazása, a rögzítések, a terhek és
+ * — ha van eredmény — a von Mises feszültségszínkép és a deformált alak.
+ */
+export function drawMembrane2D(
+  ctx: CanvasRenderingContext2D,
+  st: SceneState,
+  m: Membrane2D,
+  res: MembraneResult | null,
+  showDeform: boolean,
+): void {
+  const { camera: cam, viewport: vp } = st;
+  if (m.nodes.length === 0) return;
+  const sel = new Set(st.selectedNodes);
+  const toS = (i: number): Point => worldToScreen(cam, vp, m.nodes[i]!);
+
+  // 1. feszültségszínkép (a szín a max von Mises-hoz igazodik)
+  if (res?.ok && res.maxVonMises > 0) {
+    for (const el of res.elements) {
+      const nodes = m.elements[el.element];
+      if (!nodes) continue;
+      const ratio = Math.min(1, el.vonMisesMax / res.maxVonMises);
+      ctx.fillStyle = stressColor(ratio);
+      ctx.beginPath();
+      nodes.forEach((n, k) => {
+        const p = toS(n);
+        if (k === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // 2. háló
+  ctx.strokeStyle = 'rgba(160,190,255,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const el of m.elements) {
+    for (let k = 0; k < 4; k++) {
+      const a = toS(el[k]!);
+      const b = toS(el[(k + 1) % 4]!);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+  }
+  ctx.stroke();
+
+  // 3. kontúr: a szabad perem vastagabban
+  const used = new Set<string>();
+  ctx.strokeStyle = COLORS.beam;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (const el of m.elements) {
+    for (let k = 0; k < 4; k++) {
+      const from = el[k]!;
+      const to = el[(k + 1) % 4]!;
+      const key = from < to ? `${from}-${to}` : `${to}-${from}`;
+      if (used.has(key)) continue;
+      used.add(key);
+      const a = toS(from);
+      const b = toS(to);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+  }
+  ctx.stroke();
+
+  // 4. deformált alak
+  if (showDeform && res?.ok && res.maxU > 0) {
+    const scale = autoScale(res.maxU, 120);
+    ctx.strokeStyle = COLORS.deformed;
+    ctx.lineWidth = 1.6;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (const el of m.elements) {
+      for (let k = 0; k < 4; k++) {
+        const a = deformScreen(el[k]!);
+        const b = deformScreen(el[(k + 1) % 4]!);
+        if (!a || !b) continue;
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    function deformScreen(i: number): Point | null {
+      const p = toS(i);
+      const ux = res!.u[2 * i];
+      const uy = res!.u[2 * i + 1];
+      if (ux === undefined || uy === undefined) return null;
+      return { x: p.x + ux * cam.zoom * scale, y: p.y - uy * cam.zoom * scale };
+    }
+  }
+
+  // 5. rögzítések
+  for (const f of m.fixed) {
+    const p = toS(f.node);
+    if (f.mask === 3) drawFixed(ctx, p);
+    else if (f.mask === 1) drawPinnedX(ctx, p);
+    else if (f.mask === 2) drawPinnedY(ctx, p);
+  }
+
+  // 6. pontterhek
+  for (const ld of m.loads) {
+    const p = toS(ld.node);
+    const len = Math.hypot(ld.fx, ld.fy);
+    if (len < 1e-9) continue;
+    const ux = ld.fx / len;
+    const uy = ld.fy / len;
+    arrow(ctx, p, { x: p.x + ux * PX.loadArrow, y: p.y - uy * PX.loadArrow }, COLORS.load, 2, 7);
+  }
+
+  // 7. élterhek: a t pozitív előjele kifelé húz
+  for (const e of m.edgeLoads) {
+    const a = m.nodes[e.from];
+    const b = m.nodes[e.to];
+    if (!a || !b) return;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-12) continue;
+    const nx = (b.y - a.y) / len;
+    const ny = -(b.x - a.x) / len;
+    const pa = toS(e.from);
+    const pb = toS(e.to);
+    const sign = e.t >= 0 ? 1 : -1;
+    const ux = (pb.x - pa.x) / Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const uy = (pb.y - pa.y) / Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const off = 26 * sign;
+    const count = 3;
+    for (let i = 0; i <= count; i++) {
+      const t = i / count;
+      const mid = { x: pa.x + (pb.x - pa.x) * t, y: pa.y + (pb.y - pa.y) * t };
+      const nxS = nx * cam.zoom;
+      const nyS = -ny * cam.zoom;
+      const nlen = Math.hypot(nxS, nyS) || 1;
+      const tail = { x: mid.x + (nxS / nlen) * off, y: mid.y + (nyS / nlen) * off };
+      arrow(ctx, tail, { x: tail.x - (ux * nxS) / nlen, y: tail.y - (uy * nyS) / nlen }, COLORS.load, 1.8, 6);
+    }
+  }
+
+  // 8. csomópontok — csak közelről, hogy a háló ne legyen tömör
+  if (cam.zoom > 26) {
+    for (let i = 0; i < m.nodes.length; i++) {
+      const p = toS(i);
+      ctx.fillStyle = sel.has(i) ? COLORS.nodeSelected : 'rgba(230,237,247,0.7)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sel.has(i) ? 3.4 : 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/** a 2D mód háló-előnézete: a kattintás előtti téglalap */
+function drawMembranePreview(ctx: CanvasRenderingContext2D, st: SceneState): void {
+  const m = st.membrane2d;
+  if (st.tool !== 'mesh' || !m || !st.previewFromPoint || !st.preview) return;
+  const { camera: cam, viewport: vp } = st;
+  const a = worldToScreen(cam, vp, st.previewFromPoint);
+  const b = worldToScreen(cam, vp, st.preview);
+  const { x0, y0, x1, y1 } = {
+    x0: Math.min(a.x, b.x),
+    y0: Math.min(a.y, b.y),
+    x1: Math.max(a.x, b.x),
+    y1: Math.max(a.y, b.y),
+  };
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = COLORS.preview;
+  ctx.fillStyle = 'rgba(154,213,160,0.10)';
+  ctx.lineWidth = 1.5;
+  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  const div = Math.max(1, m.divisions);
+  ctx.beginPath();
+  for (let i = 1; i < div; i++) {
+    const x = x0 + ((x1 - x0) * i) / div;
+    ctx.moveTo(x, y0);
+    ctx.lineTo(x, y1);
+  }
+  for (let j = 1; j < div; j++) {
+    const y = y0 + ((y1 - y0) * j) / div;
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** feszültségszínkép: zöld ( nulla ) → sárga → piros ( maximum ) */
+function stressColor(ratio: number): string {
+  const r = Math.max(0, Math.min(1, ratio));
+  if (r < 0.5) {
+    const k = r / 0.5;
+    return `rgb(${Math.round(40 + 215 * k)}, ${Math.round(190 - 30 * k)}, ${Math.round(110 - 70 * k)})`;
+  }
+  const k = (r - 0.5) / 0.5;
+  return `rgb(255, ${Math.round(160 - 130 * k)}, ${Math.round(40 + 20 * k)})`;
+}
+
+/** a legnagyobb elmozdulást adott pixelszámra nagyító tényező */
+function autoScale(maxU: number, targetPx: number): number {
+  if (!(maxU > 0)) return 1;
+  return targetPx / maxU;
+}
+
+/** csak ux irányban rögzített csomópont: függőleges vonal a csomópontban */
+function drawPinnedX(ctx: CanvasRenderingContext2D, p: Point): void {
+  const h = PX.support;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y - h * 0.9);
+  ctx.lineTo(p.x, p.y + h * 0.9);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x - h, p.y);
+  ctx.lineTo(p.x + h, p.y);
+  ctx.stroke();
+  for (const dx of [-h, h]) {
+    ctx.beginPath();
+    ctx.moveTo(p.x + dx, p.y);
+    ctx.lineTo(p.x + dx * 0.55, p.y - h * 0.4);
+    ctx.moveTo(p.x + dx, p.y);
+    ctx.lineTo(p.x + dx * 0.55, p.y + h * 0.4);
+    ctx.stroke();
+  }
+}
+
+/** csak uy irányban rögzített csomópont: vízszintes vonal */
+function drawPinnedY(ctx: CanvasRenderingContext2D, p: Point): void {
+  const h = PX.support;
+  ctx.beginPath();
+  ctx.moveTo(p.x - h * 0.9, p.y);
+  ctx.lineTo(p.x + h * 0.9, p.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y - h);
+  ctx.lineTo(p.x, p.y + h);
+  ctx.stroke();
+  for (const dy of [-h, h]) {
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y + dy);
+    ctx.lineTo(p.x - h * 0.4, p.y + dy * 0.55);
+    ctx.moveTo(p.x, p.y + dy);
+    ctx.lineTo(p.x + h * 0.4, p.y + dy * 0.55);
+    ctx.stroke();
   }
 }
