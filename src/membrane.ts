@@ -184,7 +184,11 @@ function bMatrix(dN: number[][], Jinv: number[][]): number[][] {
   return B;
 }
 
-function jacobian(
+/**
+ * A Q4 elem szerkezeti jacobiánja. Közös a membrán- és a lemezelem között,
+ * hiszen a geometria azonos: négyzög a természetes (xi, eta) koordinátákban.
+ */
+export function quadJacobian(
   nodes: Node2[],
   dN: number[][],
 ): { J: number[][]; det: number; Jinv: number[][] } {
@@ -250,7 +254,7 @@ export function solveMembrane(m: MembraneModel): MembraneResult {
     let positive = true;
     for (const [xi, eta] of GAUSS) {
       const { dN } = shapeQ4(xi, eta);
-      const { det, Jinv } = jacobian(nodes, dN);
+      const { det, Jinv } = quadJacobian(nodes, dN);
       if (!(det > 0)) positive = false;
       const B = bMatrix(dN, Jinv);
       // a súly 1 minden Gauss-pontban; a térfogati elem detJ * t
@@ -383,7 +387,7 @@ export function solveMembrane(m: MembraneModel): MembraneResult {
     let maxVm = 0;
     for (const [xi, eta] of gauss) {
       const { dN } = shapeQ4(xi, eta);
-      const { Jinv } = jacobian(nodes, dN);
+      const { Jinv } = quadJacobian(nodes, dN);
       const B = bMatrix(dN, Jinv);
       // alakváltozások, majd a Hooke-törvény: ε = B·u, σ = D·ε
       const eps = [0, 0, 0];
